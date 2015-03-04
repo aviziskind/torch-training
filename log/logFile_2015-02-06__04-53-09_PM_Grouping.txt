@@ -1,0 +1,72 @@
+
+
+
+ ======================== 02/06/2015 04:53:09 PM ====================== 
+
+===Using the following network options ===
+    trainConfig:  {learningRateDecay=0.0001, weightDecay=0, momentum=0.95, learningRate=0.001, dampening=0} 
+    poolStrides:  "auto" 
+      doPooling:  true 
+        nStates:  {6, 16, -120} 
+        netType:  "ConvNet" 
+      poolSizes:  (1) {2, 2} 
+                  (2) {3, 2} 
+                  (3) {4, 2} 
+      filtSizes:  (1) {5, 5} 
+                  (2) {7, 7} 
+     trainOnGPU:  false 
+       poolType:  "MAX" 
+   convFunction:  "SpatialConvolution" 
+
+
+
+=== Using the following noisy-letter options : ===
+                   noiseFilter:  (1) {applyFourierMaskGainFactor=true, filterType="1/f", f_exp=1} 
+                                 (2) {applyFourierMaskGainFactor=true, filterType="1/f", f_exp=1.7} 
+                                 (3) {filterType="white"} 
+                       blurStd:  0 
+                    doOverFeat:  false 
+           doTextureStatistics:  false 
+    trainOnIndividualPositions:  false 
+                     imageSize:  {64, 64} 
+                     SNR_train:  {1, 1.5, 2, 2.5, 3} 
+                 autoImageSize:  false 
+                     sizeStyle:  "k32" 
+                         OriXY:  {Ny=19, dX=1, Nori=21, Nx=19, dOri=2, dY=1} 
+    retrainOnCombinedPositions:  false 
+                      fontName:  {fonts={"Snakes"}, wiggles={none=1}} 
+                     networkId:  0 
+                 trainingNoise:  "same" 
+               textureStatsUse:  "V2" 
+                       expName:  "Grouping" 
+                      stimType:  "NoisyLetters" 
+
+
+
+
+ More Details: 
+ ===Using the following networks ===  1 : Conv_f6_16_F120_fs5_5_psz2_2_ptMAX__SGD_m95
+  2 : Conv_f6_16_F120_fs5_5_psz3_2_ptMAX__SGD_m95
+  3 : Conv_f6_16_F120_fs5_5_ptMAX__SGD_m95
+  4 : Conv_f6_16_F120_fs7_7_psz2_2_ptMAX__SGD_m95
+  5 : Conv_f6_16_F120_fs7_7_psz3_2_ptMAX__SGD_m95
+  6 : Conv_f6_16_F120_fs7_7_ptMAX__SGD_m95
+
+===Using the following networks (full descriptions) ===  1 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,5. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  2 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,5. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  3 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,5. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  4 : ConvNet: fnStates=6,16;FC=120;  FiltSz=7,7. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  5 : ConvNet: fnStates=6,16;FC=120;  FiltSz=7,7. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  6 : ConvNet: fnStates=6,16;FC=120;  FiltSz=7,7. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+
+===Using the following fonts : ===
+   1 : Snakes_N
+
+=== Using the following noisy-letter settings : ===
+  1 : Snakes_N-k32_SNR1h3__21ori[2]_19x[1]_19y[1]-[64x64]_Npink10N
+  2 : Snakes_N-k32_SNR1h3__21ori[2]_19x[1]_19y[1]-[64x64]_Npink17N
+  3 : Snakes_N-k32_SNR1h3__21ori[2]_19x[1]_19y[1]-[64x64]
+
+
+
+

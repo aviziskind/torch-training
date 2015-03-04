@@ -1,0 +1,26 @@
+[[
+for a single font:
+
+(1) take a single layer network - what is performance (& training time) vs # hidden units
+
+
+(2) training vs testing on different noise levels: 
+expectation: networks trained on high SNR will mostly do better? does adding slightly lower SNR help at all? (probably not)
+
+
+
+]]
+
+
+
+[[
+multiple fonts
+(1) what if we try train a network to be able to on multiple fonts
+
+
+
+
+]]
+
+
+

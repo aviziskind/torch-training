@@ -1,0 +1,114 @@
+
+
+
+ ======================== 12/23/2014 11:28:40 PM ====================== 
+
+===Using the following network options ===
+    trainConfig:  (1) {weightDecay=0, learningRate=0.001, learningRateDecay=0.0001} 
+                  (2) {learningRateDecay=0.0001, weightDecay=0, momentum=0.95, learningRate=0.001, dampening=0} 
+                  (3) {adaptiveMethod="ADADELTA", rho=0.95, epsilon=1e-06} 
+    poolStrides:  "auto" 
+      doPooling:  true 
+        nStates:  (1) {6, 16, -120} 
+                  (2) {16, 32, -240} 
+                  (3) {16, 128, -128} 
+        netType:  "ConvNet" 
+      poolSizes:  (1) {2, 2} 
+                  (2) {3, 2} 
+                  (3) {4, 2} 
+      filtSizes:  {5, 4} 
+     trainOnGPU:  false 
+       poolType:  "MAX" 
+   convFunction:  "SpatialConvolution" 
+
+
+
+=== Using the following noisy-letter options : ===
+                       blurStd:  0 
+                    doOverFeat:  false 
+           doTextureStatistics:  false 
+    trainOnIndividualPositions:  false 
+                     imageSize:  (1) {32, 32} 
+                                 (2) {64, 64} 
+                     SNR_train:  {1, 1.5, 2, 2.5, 3} 
+                     sizeStyle:  32 
+                         OriXY:  {Ny=1, dX=0, Nori=1, Nx=1, dOri=0, dY=0} 
+                trainingWiggle:  "same" 
+    retrainOnCombinedPositions:  false 
+                      fontName:  {"SVHN"} 
+                     networkId:  0 
+               textureStatsUse:  "V2" 
+                       expName:  "Grouping" 
+                      stimType:  "NoisyLetters" 
+                 autoImageSize:  false 
+
+
+
+
+ More Details: 
+ ===Using the following networks ===  1 : Conv_f6_16_F120_psz2_2_ptMAX__SGD
+  2 : Conv_f6_16_F120_psz2_2_ptMAX__SGD_m95
+  3 : Conv_f6_16_F120_psz2_2_ptMAX__AD
+  4 : Conv_f16_32_F240_psz2_2_ptMAX__SGD
+  5 : Conv_f16_32_F240_psz2_2_ptMAX__SGD_m95
+  6 : Conv_f16_32_F240_psz2_2_ptMAX__AD
+  7 : Conv_f16_128_F128_psz2_2_ptMAX__SGD
+  8 : Conv_f16_128_F128_psz2_2_ptMAX__SGD_m95
+  9 : Conv_f16_128_F128_psz2_2_ptMAX__AD
+  10 : Conv_f6_16_F120_psz3_2_ptMAX__SGD
+  11 : Conv_f6_16_F120_psz3_2_ptMAX__SGD_m95
+  12 : Conv_f6_16_F120_psz3_2_ptMAX__AD
+  13 : Conv_f16_32_F240_psz3_2_ptMAX__SGD
+  14 : Conv_f16_32_F240_psz3_2_ptMAX__SGD_m95
+  15 : Conv_f16_32_F240_psz3_2_ptMAX__AD
+  16 : Conv_f16_128_F128_psz3_2_ptMAX__SGD
+  17 : Conv_f16_128_F128_psz3_2_ptMAX__SGD_m95
+  18 : Conv_f16_128_F128_psz3_2_ptMAX__AD
+  19 : Conv_f6_16_F120_ptMAX__SGD
+  20 : Conv_f6_16_F120_ptMAX__SGD_m95
+  21 : Conv_f6_16_F120_ptMAX__AD
+  22 : Conv_f16_32_F240_ptMAX__SGD
+  23 : Conv_f16_32_F240_ptMAX__SGD_m95
+  24 : Conv_f16_32_F240_ptMAX__AD
+  25 : Conv_f16_128_F128_ptMAX__SGD
+  26 : Conv_f16_128_F128_ptMAX__SGD_m95
+  27 : Conv_f16_128_F128_ptMAX__AD
+
+===Using the following networks (full descriptions) ===  1 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  2 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  3 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  4 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  5 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  6 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  7 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  8 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  9 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  10 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  11 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  12 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  13 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  14 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  15 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  16 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  17 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  18 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=3,2. Pnorm=MAX. PoolStrd=3,2.
+  19 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  20 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  21 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  22 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  23 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  24 : ConvNet: fnStates=16,32;FC=240;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  25 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  26 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+  27 : ConvNet: fnStates=16,128;FC=128;  FiltSz=5,4. Pooling:  PoolSz=4,2. Pnorm=MAX. PoolStrd=4,2.
+
+===Using the following fonts : ===
+   1 : SVHN
+
+=== Using the following noisy-letter settings : ===
+  1 : SVHN
+  2 : SVHN_64x64
+
+
+
+

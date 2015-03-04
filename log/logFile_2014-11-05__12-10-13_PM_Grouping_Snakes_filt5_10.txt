@@ -1,0 +1,112 @@
+
+
+
+ ======================== 11/05/2014 12:10:13 PM ====================== 
+
+===Using the following network options ===
+    poolStrides:  "auto" 
+      doPooling:  true 
+        nStates:  (1) {6, 16, -120} 
+                  (2) {6, 16, 120, -84} 
+        netType:  "ConvNet" 
+      poolSizes:  (1) {2, 2, 2} 
+                  (2) {2, 2, 0} 
+                  (3) {3, 3, 0} 
+      filtSizes:  5 
+     trainOnGPU:  false 
+       poolType:  "MAX" 
+   convFunction:  "SpatialConvolution" 
+
+
+
+=== Using the following noisy-letter options : ===
+                       blurStd:  0 
+                    doOverFeat:  false 
+           doTextureStatistics:  false 
+    trainOnIndividualPositions:  false 
+                     imageSize:  {64, 64} 
+                     SNR_train:  {1, 1.5, 2, 2.5, 3} 
+                     sizeStyle:  32 
+                         OriXY:  {Ny=10, dX=2, Nori=11, Nx=10, dOri=4, dY=2} 
+                trainingWiggle:  "same" 
+    retrainOnCombinedPositions:  false 
+                      fontName:  (1) {fonts={"Snakes"}, wiggles={none=1}} 
+                                 (2) {fonts={"Snakes"}, wiggles={orientation=10}} 
+                                 (3) {fonts={"Snakes"}, wiggles={orientation=20}} 
+                                 (4) {fonts={"Snakes"}, wiggles={orientation=30}} 
+                                 (5) {fonts={"Snakes"}, wiggles={orientation=40}} 
+                                 (6) {fonts={"Snakes"}, wiggles={orientation=50}} 
+                                 (7) {fonts={"Snakes"}, wiggles={orientation=60}} 
+                                 (8) {fonts={"Snakes"}, wiggles={orientation=70}} 
+                                 (9) {fonts={"Snakes"}, wiggles={orientation=80}} 
+                                 (10) {fonts={"Snakes"}, wiggles={orientation=90}} 
+                                 (11) {fonts={"Snakes"}, wiggles={offset=10}} 
+                                 (12) {fonts={"Snakes"}, wiggles={offset=20}} 
+                                 (13) {fonts={"Snakes"}, wiggles={offset=30}} 
+                                 (14) {fonts={"Snakes"}, wiggles={offset=40}} 
+                                 (15) {fonts={"Snakes"}, wiggles={offset=50}} 
+                                 (16) {fonts={"Snakes"}, wiggles={offset=60}} 
+                                 (17) {fonts={"Snakes"}, wiggles={phase=10}} 
+                     networkId:  0 
+               textureStatsUse:  "V2" 
+                       expName:  "Grouping" 
+                      stimType:  "NoisyLetters" 
+                 autoImageSize:  false 
+
+
+
+
+ More Details: 
+ ===Using the following networks ===  1 : Conv_f6_16_F120_fs5_5_psz2_2_ptMAX
+  2 : Conv_f6_16_120_F84_fs5_5_5_psz2_2_2_ptMAX
+  3 : Conv_f6_16_120_F84_fs5_5_5_psz2_2_0_ptMAX_MAX_0
+  4 : Conv_f6_16_F120_fs5_5_psz3_3_ptMAX
+  5 : Conv_f6_16_120_F84_fs5_5_5_psz3_3_0_ptMAX_MAX_0
+
+===Using the following networks (full descriptions) ===  1 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,5. Pooling:  PoolSz=2,2. Pnorm=MAX. PoolStrd=2,2.
+  2 : ConvNet: fnStates=6,16,120;FC=84;  FiltSz=5,5,5. Pooling:  PoolSz=2,2,2. Pnorm=MAX. PoolStrd=2,2,2.
+  3 : ConvNet: fnStates=6,16,120;FC=84;  FiltSz=5,5,5. Pooling:  PoolSz=2,2,0. Pnorm=MAX,MAX,0. PoolStrd=2,2,0.
+  4 : ConvNet: fnStates=6,16;FC=120;  FiltSz=5,5. Pooling:  PoolSz=3,3. Pnorm=MAX. PoolStrd=3,3.
+  5 : ConvNet: fnStates=6,16,120;FC=84;  FiltSz=5,5,5. Pooling:  PoolSz=3,3,0. Pnorm=MAX,MAX,0. PoolStrd=3,3,0.
+
+===Using the following fonts : ===
+   1 : Snakes_N
+  2 : Snakes_Or10
+  3 : Snakes_Or20
+  4 : Snakes_Or30
+  5 : Snakes_Or40
+  6 : Snakes_Or50
+  7 : Snakes_Or60
+  8 : Snakes_Or70
+  9 : Snakes_Or80
+  10 : Snakes_Or90
+  11 : Snakes_Of10
+  12 : Snakes_Of20
+  13 : Snakes_Of30
+  14 : Snakes_Of40
+  15 : Snakes_Of50
+  16 : Snakes_Of60
+  17 : Snakes_Ph
+
+=== Using the following noisy-letter settings : ===
+  1 : Snakes_N-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  2 : Snakes_Or10-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  3 : Snakes_Or20-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  4 : Snakes_Or30-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  5 : Snakes_Or40-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  6 : Snakes_Or50-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  7 : Snakes_Or60-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  8 : Snakes_Or70-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  9 : Snakes_Or80-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  10 : Snakes_Or90-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  11 : Snakes_Of10-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  12 : Snakes_Of20-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  13 : Snakes_Of30-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  14 : Snakes_Of40-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  15 : Snakes_Of50-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  16 : Snakes_Of60-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+  17 : Snakes_Ph-32_SNR1h3__11ori[4]_10x[2]_10y[2]-[64x64]
+
+
+
+
