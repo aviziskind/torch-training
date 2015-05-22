@@ -453,7 +453,7 @@ networkHash = function(model, includeOutputFields, includeGradFields)
                     for j = 1,lvl do
                         io.write('  ')
                     end
-                    io.write(string.format("adding hash for %s (%.4f), size = %s\n", fld, hash_thisField, toList(mod[fld]:size(), nil, 'x')))
+                    io.write(string.format("adding hash for %s (%.4f), size = %s\n", fld, hash_thisField, toList(mod[fld]:size(), 'x')))
                 end
             end                    
         end
