@@ -543,7 +543,7 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
                     --print(trainingLogger.sgd_config)
 
                 if debug then
-                    loss_filename = torchLetters_dir .. 'test/' .. 'SGD_epoch_' .. nEpochsDone+1 .. '__' .. getTime() .. '.mat'
+                    loss_filename = torchLetters_dir .. 'test/' .. 'SGD_epoch_' .. nEpochsDone+1 .. '__' .. getTimeStr() .. '.mat'
                     mattorch.save(loss_filename, {loss = allLoss})
                     print(string.format('\nSaved losses (mean = %.4f) to %s\n', allLoss:mean(), basename( loss_filename) ))
                     
@@ -935,14 +935,16 @@ end
 --]]
 
 
-getTime = function()
+getTimeStr = function()
+    return os.date("%H_%M_%S")
+    --[[
     local s = os.date()
-    local _,st = string.find(s, '2014 ')
-    local en = string.find(s, ' PM EST')
+    local _, st = string.find(s, '2015 ')
+    local en = string.find(s, ' %uM %u%uT')  -- e.g. AM EDT, PM EST, etc.
     s = string.gsub( string.gsub( string.sub(s, st+1, en-1), ':', '_'), ' ', '_')    
     return s
     -- Mon 02 Jun 2014 03:56:20 PM EDT
-    
+    --]]
 end
 
 
