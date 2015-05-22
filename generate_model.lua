@@ -1,3 +1,5 @@
+require 'image'  -- for normalization kernels
+
 generateModel = function(inputStats, networkOpts, letterOpts)
     
     local nInputs = inputStats.nInputs
@@ -87,10 +89,14 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         --local useConnectionTable_default = false
         --local useConnectionTable = useConnectionTable_default and not trainOnGPU
         --params.enforceStridePoolSizeEqual = trainOnGPU
-        
+        local n = networkOpts
         local convFunction, fanin, filtSizes, doPooling, poolSizes, poolTypes, poolStrides, trainOnGPU = 
-            networkOpts.convFunction, networkOpts.fanin, networkOpts.filtSizes, 
-            networkOpts.doPooling, networkOpts.poolSizes, networkOpts.poolTypes,     networkOpts.poolStrides, networkOpts.trainOnGPU
+            n.convFunction, n.fanin, n.filtSizes, n.doPooling, n.poolSizes, n.poolTypes, n.poolStrides, n.trainOnGPU
+        
+        local doSpatSubtrNorm,   spatSubtrNormType,   spatSubtrNormWidth,   doSpatDivNorm,   spatDivNormType,   spatDivNormWidth = 
+            n.doSpatSubtrNorm, n.spatSubtrNormType, n.spatSubtrNormWidth, n.doSpatDivNorm, n.spatDivNormType, n.spatDivNormWidth
+            
+           
         
         if convFunction == 'SpatialConvolutionMap' and trainOnGPU then
             error('SpatialConvolutionMap cannot be trained on the GPU ...')
@@ -202,13 +208,18 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 nOut_pool_h[layer_i] = nOut_conv_h[layer_i]
                 nOut_pool_w[layer_i] = nOut_conv_w[layer_i]            
             end
-            --[[
-            if doNormalization then
-                if doSubtractiveNorm
-               model:add(nn.SpatialSubtractiveNormalization(nStatesConv[layer_i], normkernel[1] ) )
+         
+ 
+            local doSpatSubtrNorm_thisLayer = doSpatSubtrNorm and string.lower(spatSubtrNormType[i]) ~= 'none'
+            if doSpatSubtrNorm_thisLayer then
+                local norm_kernel = getNormKernel(spatSubtrNormType[i], spatSubtrNormWidth[i])
+                feat_extractor:add( nn.SpatialSubtractiveNormalization(nStatesConv[layer_i], norm_kernel ) )
+            end
             
-            
-            
+            local doSpatDivNorm_thisLayer   = doSpatDivNorm  and string.lower(spatDivNormType[i]) ~= 'none' 
+            if doSpatDivNorm_thisLayer then
+                local norm_kernel = getNormKernel(spatDivNormType[i], spatDivNormWidth[i])
+                feat_extractor:add( nn.SpatialSubtractiveNormalization(nStatesConv[layer_i], norm_kernel ) )
             end
             --]]
             
@@ -405,6 +416,17 @@ moveModelBackToCPU = function(model_struct)
 end
 
 
+getNormKernel = function(kernel_type, kernel_width)
+   assert(kernel_type ~= 'none')
+   if string.lower(kernel_type) == 'gauss' then
+        return image.gaussian1D(kernel_width)
+   else
+        error('Unknown kernel type : ' .. kernel_type)
+   end
+   
+    
+end
+
 areAnySubModulesOfType = function(curModule, nn_type)
     
     
@@ -486,6 +508,7 @@ getDefaultConvNetParams = function()
     params.nStatesConv = {6,16}
     params.nStatesFC = {120}    
     params.convFunction = 'SpatialConvolutionMap'
+    
     params.fanin = {1,4,16}
     params.filtSizes = {5,4}
 
@@ -493,6 +516,9 @@ getDefaultConvNetParams = function()
     params.poolSizes = {4,2}
     params.poolTypes = {2,2}
     params.poolStrides = 'auto' --{2,2}
+
+    params.doSpatSubtrNorm = false
+    params.doSpatDivNorm = false    
 
     return params
     

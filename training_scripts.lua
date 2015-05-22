@@ -205,6 +205,7 @@ fixConvNetParams = function(networkOpts)
             poolingInAnyLayers = true
         end
     end
+    
     if not poolingInAnyLayers then
         networkOpts.poolSizes = table.rep(0, nConvLayers)
         networkOpts.poolStrides = table.rep(0, nConvLayers)
@@ -212,6 +213,49 @@ fixConvNetParams = function(networkOpts)
     end
     networkOpts.doPooling = poolingInAnyLayers
 
+ 
+
+    -- SUBTRACTIVE Normalization
+    local doSpatSubtrNorm = (networkOpts.doSpatSubtrNorm ~= false) and 
+        networkOpts.spatSubtrNormType and networkOpts.spatSubtrNormType ~= 'none' and
+        networkOpts.spatSubtrNormWidth and networkOpts.spatSubtrNormWidth > 0
+    
+    if networkOpts.doSpatSubtrNorm then
+        networkOpts.doSpatSubtrNorm = true
+    else
+        networkOpts.doSpatSubtrNorm = false
+        networkOpts.spatSubtrNormType = 'none'
+        networkOpts.spatSubtrNormWidth = 0        
+    end
+    makeSureFieldIsCorrectLength('spatSubtrNormType')
+    makeSureFieldIsCorrectLength('spatSubtrNormWidth')
+        
+        
+        
+    -- DIVISIVE Normalization
+    local doSpatDivNorm = (networkOpts.doSpatDivNorm ~= false) and 
+        networkOpts.spatDivNormType and networkOpts.spatDivNormType ~= 'none' and
+        networkOpts.spatDivNormWidth and networkOpts.spatDivNormWidth > 0
+    
+    if networkOpts.doSpatDivNorm then
+        networkOpts.doSpatDivNorm = true
+    else
+        networkOpts.doSpatDivNorm = false
+        networkOpts.spatDivNormType = 'none'
+        networkOpts.spatDivNormWidth = 0        
+    end
+    makeSureFieldIsCorrectLength('spatDivNormType')
+    makeSureFieldIsCorrectLength('spatDivNormWidth')
+    
+   
+    for i = 1,nConvLayers do
+        if not table.any(strcmpi(networkOpts.spatSubtrNormType[i], {'none', 'gauss'})) then
+            error(string.format('Unknown divisive normalization type : %s', networkOpts.spatSubtrNormType[i]))
+        end
+        if not table.any(strcmpi(networkOpts.spatDivNormType[i], {'none', 'gauss'})) then
+            error(string.format('Unknown divisive normalization type : %s', networkOpts.spatDivNormType[i]))
+        end
+    end    
        
     return networkOpts
     
@@ -258,10 +302,10 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         error(string.format('Unknown spatial convolution function : %s', tostring(convFunction)) )
     end
     
-    local nStates_str = table.concat(networkOpts.nStatesConv, '_') 
+    local nStates_str = abbrevList(networkOpts.nStatesConv, '_') 
     local nStates_str_nice = 'nStates=' .. table.concat(networkOpts.nStatesConv, ',') .. ';' 
     if nFCLayers > 0 then
-        nStates_str  = nStates_str  ..  '_F' .. table.concat(networkOpts.nStatesFC, '_')
+        nStates_str  = nStates_str  ..  '_F' .. abbrevList(networkOpts.nStatesFC, '_')
         nStates_str_nice = nStates_str_nice .. 'FC=' .. table.concat(networkOpts.nStatesFC, ',') .. '; ' 
     end
     
@@ -269,18 +313,46 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     
     local filtSizes_str = ''
     local filtSizes_str_nice = '';
-    if not isequal(networkOpts.filtSizes, defaultParams.filtSizes, nConvLayers) then        
-        if isequal(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
+    assert(#networkOpts.filtSizes == nConvLayers)
+    if not isequal_upTo(networkOpts.filtSizes, defaultParams.filtSizes, nConvLayers) then        
+        if isequal_upTo(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
             filtSizes_str = '_nofilt'
+        elseif length(table.nUnique(networkOpts.filtSizes) == 1 then
+            filtSizes_str = '_fs' .. networkOpts.filtSizes[1]
         else
-            filtSizes_str = '_fs' .. toTruncList(networkOpts.filtSizes, nConvLayers)
+            filtSizes_str = '_fs' .. abbrevList(networkOpts.filtSizes)
         end
     end
+    
+    networkPropertyStr = function(fieldName, networkOpts, defaultParams, fldAbbrev, str_NA)
+        nConvLayers = (#networkOpts.nStatesConv)
+        local networkProp = networkOpts[fieldName]
+        local defaultProp = defaultParams[fieldName]
+        local property_str = ''
+        assert(#networkProp == nConvLayers)
+        if not isequal_upTo(networkProp, defaultProp, nConvLayers) then        
+            if isequal_upTo(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
+                property_str = '_' .. str_NA
+            elseif length(table.nUnique(networkOpts.filtSizes) == 1 then
+                property_str = '_' .. fldAbbrev .. networkProp[1]
+            else
+                property_str = '_' .. fldAbbrev .. abbrevList(networkProp)
+            end
+        end
+        
+        return property_str
+    end
+    
+    
+    
+    filtSizes_str, filtSizes_str_nice = networkPropertyStr('filtSizes', networkOpts, defaultParams, 'fs', 'nofilt')
+    
+    
     if niceOutputFields == 'all' or table.contains(niceOutputFields, 'filtSizes') then
         if isequal(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
             filtSizes_str_nice = ' No Filter.'
         else
-            filtSizes_str_nice = ' FiltSz=' .. toTruncList(networkOpts.filtSizes, nConvLayers, ',') .. '.'
+            filtSizes_str_nice = ' FiltSz=' .. abbrevList(networkOpts.filtSizes, ',') .. '.'
         end
     end
 
