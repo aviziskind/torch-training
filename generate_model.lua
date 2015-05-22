@@ -1,10 +1,10 @@
 generateModel = function(inputStats, networkOpts, letterOpts)
     
     local nInputs = inputStats.nInputs
-    local height  = inputStats.height;
-    local width   = inputStats.width;
-    local nClasses = inputStats.nClasses
-    local nPositions = inputStats.nPositions
+    local height  = inputStats.height;        assert(height)
+    local width   = inputStats.width;         assert(width)
+    local nClasses = inputStats.nClasses or inputStats.nOutputs;  assert(nClasses)
+    local nPositions = inputStats.nPositions or 1
     
     local useConvNet = networkOpts.ConvNet or networkOpts.netType == 'ConvNet'
     local doSplit = (networkOpts.split and networkOpts.split == true) or false
@@ -21,7 +21,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         
         
     local fontClassesTable = nil
-    if letterOpts.classifierForEachFont then        
+    if letterOpts and letterOpts.classifierForEachFont then        
         fontClassesTable = getFontClassTable(getFontList(letterOpts.fontName))
         nClasses = fontClassesTable.nClassesTot
     end
@@ -88,9 +88,9 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         --local useConnectionTable = useConnectionTable_default and not trainOnGPU
         --params.enforceStridePoolSizeEqual = trainOnGPU
         
-        local convFunction, fanin, filtSizes, doPooling, poolSizes, poolType, poolStrides, trainOnGPU = 
+        local convFunction, fanin, filtSizes, doPooling, poolSizes, poolTypes, poolStrides, trainOnGPU = 
             networkOpts.convFunction, networkOpts.fanin, networkOpts.filtSizes, 
-            networkOpts.doPooling, networkOpts.poolSizes, networkOpts.poolType, networkOpts.poolStrides, networkOpts.trainOnGPU
+            networkOpts.doPooling, networkOpts.poolSizes, networkOpts.poolTypes,     networkOpts.poolStrides, networkOpts.trainOnGPU
         
         if convFunction == 'SpatialConvolutionMap' and trainOnGPU then
             error('SpatialConvolutionMap cannot be trained on the GPU ...')
@@ -125,6 +125,9 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 if convFunction == 'SpatialConvolutionMap' then
                     -- fanin: how many incoming connections (from a state) in previous layer each output unit receives input from.
                     -- this cant be more than the number of states in previous layer!
+                    Fanin = fanin
+                    NStatesConv = nStatesConv
+                    Layer_i = layer_i
                     local fanin_use = math.min(fanin[layer_i], nStatesConv[layer_i-1]) 
                     connectTables[layer_i] = nn.tables.random(nStatesConv[layer_i-1], nStatesConv[layer_i], fanin_use) -- OK b/c only 1 feature--- 
                     SpatConvModule = nn.SpatialConvolutionMap(connectTables[layer_i], kW, kH)
@@ -159,7 +162,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 
             
             -- 3. Spatial pooling / sub-sampling
-            local poolType_thisLayer = poolType[layer_i]
+            local poolType_thisLayer = poolTypes[layer_i]
             if doPooling and not (poolType_thisLayer == 0) then
                 
                 local doMaxPooling = (type(poolType_thisLayer) == 'string') and (string.upper(poolType_thisLayer) == 'MAX')
@@ -183,10 +186,10 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                         poolingModule = nn.SpatialLPPooling(nStatesConv[layer_i], poolType_thisLayer, kW, kH, dW, dH)
                     else                     
                         error(string.format('unhandled case: pool type = %s', tostring(poolType_thisLayer)))
-                        --feat_extractor:add(nn.Power(poolType))
+                        --feat_extractor:add(nn.Power(poolTypes))
                         --feat_extractor:add(nn.SpatialSubSampling(nStatesConv[layer_i], 
                           --      poolSizes[layer_i], poolSizes[layer_i], poolStrides[layer_i], poolStrides[layer_i]))
-                        --feat_extractor:add(nn.Power(1/poolType))
+                        --feat_extractor:add(nn.Power(1/poolTypes))
                     end
                 end
                 assert(poolStrides[layer_i] <= poolSizes[layer_i])
@@ -199,6 +202,16 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 nOut_pool_h[layer_i] = nOut_conv_h[layer_i]
                 nOut_pool_w[layer_i] = nOut_conv_w[layer_i]            
             end
+            --[[
+            if doNormalization then
+                if doSubtractiveNorm
+               model:add(nn.SpatialSubtractiveNormalization(nStatesConv[layer_i], normkernel[1] ) )
+            
+            
+            
+            end
+            --]]
+            
         end
         
         if useCUDAmodules then
@@ -267,7 +280,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         params.filtSizes = filtSizes
         params.poolSizes = poolSizes
         params.poolStrides = poolStrides
-        params.poolType = poolType
+        params.poolTypes = poolTypes
         params.nOutputs_last = nOutputs_last
         params.connectTables = connectTables 
         --params.useConnectionTable = useConnectionTable
@@ -478,7 +491,7 @@ getDefaultConvNetParams = function()
 
     params.doPooling = true
     params.poolSizes = {4,2}
-    params.poolType = {2,2}
+    params.poolTypes = {2,2}
     params.poolStrides = 'auto' --{2,2}
 
     return params
@@ -1089,10 +1102,10 @@ nOutputsFromConvStages = function(networkOpts, imageSize)
     nStatesConv[0] = nInputPlanes
     local nConvLayers = #nStatesConv
     
-    local filtSizes,          doPooling,              poolSizes,             poolType,              poolStrides = 
-        networkOpts.filtSizes, networkOpts.doPooling, networkOpts.poolSizes, networkOpts.poolType,  networkOpts.poolStrides
+    local filtSizes,          doPooling,              poolSizes,             poolTypes,              poolStrides = 
+        networkOpts.filtSizes, networkOpts.doPooling, networkOpts.poolSizes, networkOpts.poolTypes,  networkOpts.poolStrides
             
-    --print('poolType = ', poolType)
+    --print('poolTypes = ', poolTypes)
     NetworkOpts = networkOpts
         
     local nOut_conv_h = {}
@@ -1118,7 +1131,7 @@ nOutputsFromConvStages = function(networkOpts, imageSize)
         end
             
         -- 3. Spatial pooling / sub-sampling
-        local poolType_thisLayer = poolType[layer_i]
+        local poolType_thisLayer = poolTypes[layer_i]
         if doPooling and not (poolType_thisLayer == 0) and (nOut_conv_h[layer_i] > 0) and  (nOut_conv_w[layer_i] > 0) then
             assert(poolStrides[layer_i] <= poolSizes[layer_i])
             
