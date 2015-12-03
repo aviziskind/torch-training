@@ -1,12 +1,13 @@
-trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verbose)
+trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     --print('Training Call')
-    E = extraTrainingOpts
+    E = trainingOpts
     verbose = true
     local showTrainTestTime = false
-    local trainOnIndividualPositions = extraTrainingOpts.trainOnIndividualPositions
-    local redoTrainingAlways = extraTrainingOpts.redoTraining --or true
+    local trainOnIndividualPositions = trainingOpts.trainOnIndividualPositions
+    local redoTrainingAlways = trainingOpts.redoTraining --or true
     local redoTrainingIfOld = true
+    --local redoTrainingIfOld_date = 1444887467 
     local redoTrainingIfOld_date = 1402977793 -- (6/15, late) --  1402928294 --(6/15)      --1393876070 -- os.time()
     local forceContinueTraining = true
     local forceContinueTrainingIfBefore = 1417727482 -- (12/4)   1401632026 -- =(6/1) --  1399960186 -- 1399958480 --1393878677  -- os.time()
@@ -16,23 +17,25 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
     local trainingAlgorithm = 'SGD'
     --local trainingAlgorithm = 'L-BFGS'
     
-    extraTrainingOpts = extraTrainingOpts or {}
+    trainingOpts = trainingOpts or {}
     local haveTestData = testData ~= nil 
     
-    local freezeFeatures = extraTrainingOpts.freezeFeatures or false-- copy this value, in case overwritten by loading from file
+    local freezeFeatures = trainingOpts.freezeFeatures or false-- copy this value, in case overwritten by loading from file
     local debug = false
     ---------------
     local progressBar_nStars = 50
     local continueTraining = true
     local reasonToStopTraining
     local nEpochsDone = 0
-    local batchSize = extraTrainingOpts.BATCH_SIZE or 1
+    local batchSize = trainingOpts.BATCH_SIZE or 1
     local groupBatch = model_struct.parameters.convFunction and string.find(model_struct.parameters.convFunction, 'CUDA')
     local trainOnGPU = model_struct.parameters.trainOnGPU
     local prev_loss = 0
     local prev_trainErr_pct = 100
     local prev_testErr_pct
     local nClasses = trainData.nClasses
+    
+    local memoryAvailableBuffer_MB = trainingOpts.memoryAvailableBuffer or 3000 --- dont leave less than this amount of memory available
     
     if trainOnIndividualPositions then
         nClasses = nClasses * trainData.nPositions                
@@ -43,18 +46,21 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
     
     local resizeInputToVector = model_struct.parameters.resizeInputToVector or false
     
-    local expSubtitle_use = extraTrainingOpts.expSubtitle
+    local trainingFileBase = trainingOpts.trainingFileBase
     
-    local csvLogFile   = training_dir .. expSubtitle_use .. '.csv'    
-    local torchLogFile = training_dir .. expSubtitle_use .. '.t7'
+    local csvLogFile   = trainingFileBase .. '.csv'    
+    local torchLogFile = trainingFileBase .. '.t7'
+        
+    if redoTrainingAlways then
+        io.write('\n === Warning -- retraining ALL models ===\n')
+    end 
         
     local trainingOpts_default = {MIN_EPOCHS = 5, MAX_EPOCHS = 500, EXTRA_EPOCHS = 0, 
-        SWITCH_TO_LBFGS_AT_END = true, SAVE_TRAINING = true, 
+        SWITCH_TO_LBFGS_AT_END = false, SAVE_TRAINING = true, 
         TEST_ERR_NEPOCHS_STOP_AFTER_MIN = 10} 
     
-    local trainingOpts = trainingOpts_default
-    if extraTrainingOpts then
-        for k,v in pairs(extraTrainingOpts) do
+    for k,v in pairs(trainingOpts_default) do
+        if not trainingOpts[k] then
             trainingOpts[k] = v
         end
     end
@@ -69,7 +75,7 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
         weightDecay = 0,
         momentum = 0
     }
-    local sgd_config = extraTrainingOpts.trainConfig --  or sgd_config_default;
+    local sgd_config = trainingOpts.trainConfig --  or sgd_config_default;
     
     
     trainingLogger.sgd_config = sgd_config
@@ -101,7 +107,7 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
             fileTooOld = true
         end
         
-        if not fileTooOld and fileDate and extraTrainingOpts.prevTrainingDate then
+        if not fileTooOld and fileDate and trainingOpts.prevTrainingDate then
             if trainingOpts.prevTrainingDate > fileDate then   -- pre-training of network is newer than current saved training
                 print(string.format('Pretrained network (%s) is NEWER than the saved training for the retrained network (%s):\nHave to start the retraining from scratch...', 
                         os.date("%x %X", trainingOpts.prevTrainingDate), os.date("%x %X", (fileDate) ) ) )
@@ -277,7 +283,13 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
 
         print(string.format('New features have %d elements (instead of the original of %d)\n', torch.nElements(sample_outputFromFeat), torch.nElements( sampleInput )  ))
         
+        local memoryAvailable_MB = sys.memoryAvailable()
+        if sizeOfNewInputs_MB > (memoryAvailable_MB  - memoryAvailableBuffer_MB ) then
+            error(string.format('Not enough memory available. New inputs would take up %.1f MB, but only have %.1f MB available (and want to have a buffer of %.1f\n Free up some memory for this experiment.', sizeOfNewInputs_MB, memoryAvailable_MB, memoryAvailableBuffer_MB))
+        end
+        
         usePreExtractedFeatures = sizeOfNewInputs_MB < maxSizeInput_MB
+        
         if usePreExtractedFeatures then
             print(string.format('New input training/test tensors will require %.1f MB ', sizeOfNewInputs_MB))
         else
@@ -416,7 +428,7 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
                 if output:dim() > 1 then
                     output = output:resize(nOutputs)
                 end
-                          
+                
                 loss = loss + criterion:forward(output, target)
                                 
                 model_toTrain:backward(input, criterion:backward(output, target))
@@ -513,7 +525,7 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
     
     local logger
     if trainingOpts.SAVE_TRAINING then
-        createFolder(training_dir)
+        paths.createFolder(training_dir)
         
         logger = optim.Logger2(csvLogFile, logger_open_mode)
     end
@@ -616,7 +628,7 @@ trainModel = function(model_struct, trainData, testData, extraTrainingOpts, verb
 
         if trainingAlgorithm == 'SGD' then
 
-            batchSize = extraTrainingOpts.BATCH_SIZE or 1
+            batchSize = trainingOpts.BATCH_SIZE or 1
             progressBar.init(nTrainingSamples, progressBar_nStars) --- progressbar for SGD
         
             trainConfusionMtx:zero()
@@ -748,7 +760,8 @@ end
 
 --testModel = function(model_struct, testData, verbose, getLoss)
 testModel = function(model_struct, testData, opt)
-
+    assert(#testData == 0)
+    Tm = testData
     opt = opt or {}
     local verbose = opt.verbose or false
     local getLoss = opt.getLoss or false
@@ -912,7 +925,7 @@ testModel = function(model_struct, testData, opt)
     if verbose then
         local totalTime = toc()
         local timeEachSample_sec = (totalTime / nTestSamples)
-        io.write(string.format('\n [con]: %.2f ==> Total time: %.2f sec. Time for each sample = %.2f ms. ', 
+        io.write(string.format('\n [test]: %.2f ==> Total time: %.3f sec. Time for each sample = %.3f ms. \n', 
                 testErr_pct_total, totalTime, timeEachSample_sec *1000))
         --print(testConfusionMtx)
     end

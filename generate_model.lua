@@ -96,8 +96,13 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         local doSpatSubtrNorm,   spatSubtrNormType,   spatSubtrNormWidth,   doSpatDivNorm,   spatDivNormType,   spatDivNormWidth = 
             n.doSpatSubtrNorm, n.spatSubtrNormType, n.spatSubtrNormWidth, n.doSpatDivNorm, n.spatDivNormType, n.spatDivNormWidth
             
-           
-        
+        local zeroPadForPooling = n.zeroPadForPooling or true
+        local splitInTwo = function(x)
+           local a = math.ceil(x/2)
+           local b = x-a 
+           return a, b
+        end
+
         if convFunction == 'SpatialConvolutionMap' and trainOnGPU then
             error('SpatialConvolutionMap cannot be trained on the GPU ...')
         end
@@ -112,8 +117,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         local connectTables = {}
         local nOut_conv_h = {}
         local nOut_conv_w = {}
-        local nOut_pool_h = {}
-        local nOut_pool_w = {}
+        local nOut_pool_h,  nOut_pool_h_uncropped = {}
+        local nOut_pool_w,  nOut_pool_w_uncropped = {}
         nOut_pool_h[0] = height
         nOut_pool_w[0] = width
         
@@ -144,6 +149,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 elseif convFunction == 'SpatialConvolutionCUDA' then
                     SpatConvModule = nn.SpatialConvolutionCUDA(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)
                     
+                elseif convFunction == 'SpatialConvolutionMM' then
+                    SpatConvModule = nn.SpatialConvolutionMM(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)                                        
                 else 
                     error('Unknown spatial convolution function : ' .. tostring(convFunction))
                 end
@@ -176,7 +183,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 local kW, kH = poolSizes[layer_i],   poolSizes[layer_i]
                 local dW, dH = poolStrides[layer_i], poolStrides[layer_i]
                 
-                if useCUDAmodules then
+                if useCUDAmodules and convFunction == 'SpatialConvolutionCUDA' then
                     if doMaxPooling then
                         poolingModule = nn.SpatialMaxPoolingCUDA( kW, kH, dW, dH )
                     else
@@ -200,10 +207,51 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 end
                 assert(poolStrides[layer_i] <= poolSizes[layer_i])
                 
-                feat_extractor:add(poolingModule)
-                
                 nOut_pool_h[layer_i] = math.floor( (nOut_conv_h[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
                 nOut_pool_w[layer_i] = math.floor( (nOut_conv_w[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
+                
+                local nCovered_pool_h = (nOut_pool_h[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
+                local nCovered_pool_w = (nOut_pool_w[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
+                
+                local dropped_pixels_h = nOut_conv_h[layer_i]  - nCovered_pool_h
+                local dropped_pixels_w = nOut_conv_w[layer_i]  - nCovered_pool_w
+                   
+                if (dropped_pixels_h > 0 or dropped_pixels_w > 0) then
+                    if zeroPadForPooling then 
+                        nOut_pool_h[layer_i] = math.ceil( (nOut_conv_h[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
+                        nOut_pool_w[layer_i] = math.ceil( (nOut_conv_w[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
+                        
+                        local nCovered_pool_h_ext = (nOut_pool_h[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
+                        local nCovered_pool_w_ext = (nOut_pool_w[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
+
+                        local nPad_h = nCovered_pool_h_ext - nOut_conv_h[layer_i];
+                        local nPad_w = nCovered_pool_w_ext - nOut_conv_w[layer_i];
+                        
+                        local padTop,  padBottom = splitInTwo(nPad_h)
+                        local padLeft, padRight  = splitInTwo(nPad_w)
+                        --local padTop,  padBottom = nPad_h, 0
+                        --local padLeft, padRight  = nPad_w, 0
+                        local zeroPaddingModule = nn.SpatialZeroPadding(padLeft, padRight, padTop, padBottom)
+                        --print(string.format('   output of layer %d : %dx%d\n', layer_i, nOut_pool_h[layer_i], nOut_pool_w[layer_i]))
+                        print(string.format('  >> Warning : Pooling in layer %d would drop %d from the height and %d from the width.',
+                                layer_i, dropped_pixels_h, dropped_pixels_w))
+                        print(string.format('  >> So we are adding %d x %d of zero padding [L%d, R%d, T%d, B%d] before adding the pooling module',
+                            nPad_h, nPad_w,padLeft, padRight, padTop, padBottom))
+                                
+                        feat_extractor:add(zeroPaddingModule)
+                                              
+                        
+                    else
+                        error(string.format('Warning : Pooling in layer %d drops %d from the height and %d from the width', 
+                                layer_i, dropped_pixels_h, dropped_pixels_w))
+                    end
+                    
+                end
+                
+                 
+                feat_extractor:add(poolingModule)
+                
+                
             else
                 nOut_pool_h[layer_i] = nOut_conv_h[layer_i]
                 nOut_pool_w[layer_i] = nOut_conv_w[layer_i]            
@@ -706,8 +754,15 @@ copyConvolutionalFiltersToNetwork = function (model_struct1, model_struct2)
             io.write(string.format('Copying Conv filter #%d from network1 (size=%s) to network2 (size=%s) \n', 
                     convLayer_idx, tostring_inline(w1:size()), tostring_inline(w2:size()) ) )
             --copyConvolutionalWeights(full_model1, net1_idx, full_model2, net2_idx)
-            w1:copy(w2)
+            w2:copy(w1)
             
+            local b1 = full_model1.modules[net1_idx].bias
+            local b2 = full_model2.modules[net2_idx].bias
+
+            io.write(string.format('Copying bias #%d from network1 (size=%s) to network2 (size=%s) \n\n', 
+                    convLayer_idx, tostring_inline(b1:size()), tostring_inline(b2:size()) ) )
+            --copyConvolutionalWeights(full_model1, net1_idx, full_model2, net2_idx)
+            b2:copy(b1)
             --full_model1.modules[net1_idx].weight:copy(full_model2.modules[net2_idx].weight)
     
         elseif net1_idx and not net2_idx then
@@ -725,6 +780,64 @@ copyConvolutionalFiltersToNetwork = function (model_struct1, model_struct2)
    
     
 end
+
+
+
+areConvolutionalWeightsTheSame = function(model_struct1, model_struct2)
+    
+    local full_model1 = getStreamlinedModel(model_struct1.model)
+    local full_model2 = getStreamlinedModel(model_struct2.model)
+    
+    
+    local net1_idx, net2_idx, convLayer_idx
+    convLayer_idx = 1
+    
+    local val1,val2
+    
+    
+    repeat 
+        net1_idx = getModuleIndex(full_model1, 'Conv' .. convLayer_idx)
+        net2_idx = getModuleIndex(full_model2, 'Conv' .. convLayer_idx)
+        if net1_idx and net2_idx then
+            local w1 = full_model1.modules[net1_idx].weight
+            local w2 = full_model2.modules[net2_idx].weight
+            local b1 = full_model1.modules[net1_idx].bias
+            local b2 = full_model2.modules[net2_idx].bias
+            
+            
+            if not val1 then
+                val1 = w1:storage()[w1:storageOffset()]
+                val2 = w2:storage()[w2:storageOffset()]
+            end
+            if not torch.tensorsEqual(w1, w2) or not torch.tensorsEqual(b1, b2) then    
+                return false, val1, val2
+            end
+                        
+            convLayer_idx = convLayer_idx + 1
+        end
+    until (not net1_idx and not net2_idx)
+    
+    assert(val1 == val2)
+    return true, val1, val2
+    
+end
+
+
+firstConvolutionalWeightValue = function(model_struct1)
+    
+    full_model1 = getStreamlinedModel(model_struct1.model)    
+    
+    local net1_idx = getModuleIndex(full_model1, 'Conv1')
+    if net1_idx then
+        local val1 = full_model1.modules[net1_idx].weight:storage()[1]
+        local val2 = full_model1.modules[net1_idx].weight:storage()[2]
+        --return val1, val2        
+        return val1
+    end
+    
+end
+
+
 
 copyConvolutionalWeights = function (model1, mod1_idx, model2, mod2_idx)
     M1 = model1
@@ -1056,11 +1169,19 @@ convertNetworkToMatlabFormat = function(model)
                 elseif (module_str == 'SpatialSubSampling') then                    
                     net[ 'm' .. j .. '_kH'] = torch.DoubleTensor({module_i.kH})
                     net[ 'm' .. j .. '_kW'] = torch.DoubleTensor({module_i.kW})
-                    net[ 'm' .. j .. '_dH'] = torch.DoubleTensor({module_i.dH})
+                    net[ 'm' .. j .. '_dH'] = torch.DoubleTensor({module_i.dH}) 
                     net[ 'm' .. j .. '_dW'] = torch.DoubleTensor({module_i.dW})
                     net[ 'm' .. j .. '_connTable'] = module_i.connTable
                     
                     module_name_str = 'SubSamp'
+                
+                elseif (module_str == 'SpatialZeroPadding') then                    
+                    net[ 'm' .. j .. '_pad_l'] = torch.DoubleTensor({module_i.pad_l})
+                    net[ 'm' .. j .. '_pad_r'] = torch.DoubleTensor({module_i.pad_r})
+                    net[ 'm' .. j .. '_pad_t'] = torch.DoubleTensor({module_i.pad_t})
+                    net[ 'm' .. j .. '_pad_b'] = torch.DoubleTensor({module_i.pad_b})
+                    
+                    module_name_str = 'ZeroPad'
                     
                 elseif (module_str == 'SpatialMaxPooling') or (module_str == 'SpatialMaxPoolingCUDA') then                    
                     net[ 'm' .. j .. '_kH'] = torch.DoubleTensor({module_i.kH})
@@ -1080,7 +1201,8 @@ convertNetworkToMatlabFormat = function(model)
                 
                 elseif module_str == 'Transpose' then
                     
-                    net[ 'm' .. j .. '_permutations'] = tbltbl2Tensor ( module_i.permutations ):double()
+                    --net[ 'm' .. j .. '_permutations'] = tbltbl2Tensor ( module_i.permutations ):double()
+                    net[ 'm' .. j .. '_permutations'] = table.toTensor ( module_i.permutations ):double()
                                 
                 elseif (module_str == 'Square') or (module_str == 'Sqrt') or (module_str == 'Copy') or 
                     (module_str == 'Tanh') or (module_str == 'Reshape') or (module_str == 'LogSoftMax') or (module_str == 'Exp')  then     
@@ -1174,4 +1296,5 @@ nOutputsFromConvStages = function(networkOpts, imageSize)
         
     return nOutputs_last, nUnitsInLastLayerPerBank
 end
+        
         

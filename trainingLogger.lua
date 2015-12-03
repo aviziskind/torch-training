@@ -19,6 +19,7 @@
         self.params.LBFGS_USE_REDUCED_SET_FIRST = false
         self.params.REQUIRE_COST_MINIMUM = false -- require cost function to reach local 
         self.params.REQUIRE_TRAINING_ERR_MINIMUM = true
+        self.params.STOP_IF_ZERO_TEST_ERROR = true
         self.params.SAVE_TRAINING = true
                                   -- minimum (vs use either cost/train error as criterion)
         
@@ -156,7 +157,9 @@
         p = self.params
     
       -- wait until (1) have very little change in cost function (<0.1% change over nAverage epochs). 
-      -- but, also have a minimum of MIN_EPOCHS. and if gradient started off small, wait until got at least twice max gradient of beginning, before allowing to settle down.
+      -- but, also have a minimum of MIN_EPOCHS (unless STOP_IF_ZERO_TEST_ERROR = true, and have no test error)
+      
+      --. and if gradient started off small, wait until got at least twice max gradient of beginning, before allowing to settle down.
       -- is if  gradient that is greater than initial gradient 
       -- keep 
 
@@ -212,8 +215,13 @@
             
             local decided = false
                         
-            --print(nEpochs, p.MIN_EPOCHS, p.MAX_EPOCHS)
-            if (nEpochs < p.MIN_EPOCHS) then -- always continue if not yet 10 epochs
+            if (self.testErr[nEpochs] == 0 and p.STOP_IF_ZERO_TEST_ERROR ) then -- always continue if not yet 10 epochs
+                self.satisfiedStopCriterion = true
+                self.trainingState = 'SGD'
+                decided = true
+                     
+            
+            elseif (nEpochs < p.MIN_EPOCHS) then -- always continue if not yet 10 epochs
                 self.satisfiedStopCriterion = false
                 self.trainingState = 'SGD'
                 decided = true
