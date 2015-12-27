@@ -23,6 +23,8 @@
         self.params.SAVE_TRAINING = true
                                   -- minimum (vs use either cost/train error as criterion)
         
+        
+        self.trainingClassifier = true;
         self.nEpochs = 0
         self.nExtraEpochs = 0
         self.filename = {}
@@ -40,6 +42,7 @@
         
         self.epochTrainingTime = {}
         self.lastUpdated = {}
+        
         
         if newParams ~= nil then
             self:setOptions(newParams)
@@ -166,29 +169,42 @@
         
         local nEpochs = self.nEpochs
                     
+        local cost_below_change_threshold, train_err_below_change_threshold, minTestError_epoch, test_err_stopped_decreasing
+    
+                    
         if nEpochs > 1  then -- and self.trainingState == 'SGD' then
             self.dCost_frac = self.dCost_frac or {}
-            self.dTrainErr_frac = self.dTrainErr_frac or {}
             
             self.dCost_frac[nEpochs] = self.dCost[nEpochs] / (self.cost[nEpochs-1] + 1e-5)
-            self.dTrainErr_frac[nEpochs] = self.dTrainErr[nEpochs] / (self.trainErr[nEpochs-1] + 1e-5)
-           
-
-            --print(self.dTrainErr_frac[nEpochs] .. ' = ' ..  self.dTrainErr[nEpochs] .. ' / ' .. self.trainErr[nEpochs-1])
-
-            --nAverage = 1
-            --iStart = math.max(1, nEpochs-nAverage)
-
-            --for i = iStart, nEpochs do
-            --    self.dcost_frac_rav[nEpochs] = self.dcost_frac_rav[nEpochs] +  self.dcost_frac[i]
-            --end
-            --self.dcost_frac_rav[nEpochs] = self.dcost_frac_rav[nEpochs] / (nEpochs - iStart + 1)
+            cost_below_change_threshold = (self.dCost_frac[nEpochs] < p.COST_CHANGE_FRAC_THRESH)          
+            --io.write(string.format(' dCost = %.5f  <?  th = %.5f  :  %s \n ', 
+              --      self.dCost_frac[nEpochs], p.COST_CHANGE_FRAC_THRESH, tostring(cost_below_change_threshold)))
+            S = self
+            --print('cost_below_change_threshold', cost_below_change_threshold)
             
-            local cost_below_change_threshold = (self.dCost_frac[nEpochs] < p.COST_CHANGE_FRAC_THRESH)          
-            local train_err_below_change_threshold = (self.dTrainErr_frac[nEpochs] < p.TRAIN_ERR_CHANGE_FRAC_THRESH)
-            local minTestError_epoch = self:epochOfMinTestError()
-            local test_err_stopped_decreasing = (p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN > 0) and (nEpochs - minTestError_epoch) > p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN
+                self.dTrainErr_frac = self.dTrainErr_frac or {}
             
+                self.dTrainErr_frac[nEpochs] = self.dTrainErr[nEpochs] / (self.trainErr[nEpochs-1] + 1e-5)
+
+            --if p.trainingClassifier then            
+                --print(self.dTrainErr_frac[nEpochs] .. ' = ' ..  self.dTrainErr[nEpochs] .. ' / ' .. self.trainErr[nEpochs-1])
+
+                --nAverage = 1
+                --iStart = math.max(1, nEpochs-nAverage)
+
+                --for i = iStart, nEpochs do
+                --    self.dcost_frac_rav[nEpochs] = self.dcost_frac_rav[nEpochs] +  self.dcost_frac[i]
+                --end
+                --self.dcost_frac_rav[nEpochs] = self.dcost_frac_rav[nEpochs] / (nEpochs - iStart + 1)
+                
+                train_err_below_change_threshold = (self.dTrainErr_frac[nEpochs] < p.TRAIN_ERR_CHANGE_FRAC_THRESH)
+                minTestError_epoch = self:epochOfMinTestError()
+                test_err_stopped_decreasing = (p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN > 0) 
+                                        and (nEpochs - minTestError_epoch) > p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN
+                p.test_err_stopped_decreasing = test_err_stopped_decreasing
+                
+        --end
+        
             --train_err_zero = self.trainErr[nEpochs] == 0
             --test_err_zero = self.testErr[nEpochs] == 0
             
@@ -200,6 +216,7 @@
             --print(self.dCost_frac[nEpochs]*100, self.dTrainErr_frac[nEpochs]*100)
             --print(cost_below_change_threshold, train_err_below_change_threshold)
             
+            --[[
             if p.REQUIRE_COST_MINIMUM then
                 if train_err_below_change_threshold then
                     print('continuing even though train has bottomed out')
@@ -211,65 +228,110 @@
                 end
                 test_err_stopped_decreasing = false
             end
-            
+            --]]
             
             local decided = false
                         
-            if (self.testErr[nEpochs] == 0 and p.STOP_IF_ZERO_TEST_ERROR ) then -- always continue if not yet 10 epochs
-                self.satisfiedStopCriterion = true
-                self.trainingState = 'SGD'
-                decided = true
-                     
-            
-            elseif (nEpochs < p.MIN_EPOCHS) then -- always continue if not yet 10 epochs
+            -- 0. manual flag
+            if self.forcingContinue then
                 self.satisfiedStopCriterion = false
+                self.reason = 'forcing continuation of training...'
+                decided = true
+            end
+            
+            -- 1. use min/max epochs
+            
+            if (nEpochs < p.MIN_EPOCHS) then -- always continue if not yet MIN_EPOCHS epochs
+                self.satisfiedStopCriterion = false
+                self.reason = 'too few epochs'
                 self.trainingState = 'SGD'
                 decided = true
             end
                 --print('too few epochs')
                 
-            if (nEpochs >= p.MAX_EPOCHS) then -- stop after max
+            if (nEpochs >= p.MAX_EPOCHS) then -- always stop after MAX_EPOCHS
                 self.satisfiedStopCriterion = true
                 --self.nExtraEpochs = p.EXTRA_EPOCHS+1 -- a hack to stop immediately after this run
                 
                 self.reason = 'Exceeded max number of epochs (' .. p.MAX_EPOCHS .. ')'               
                 decided = true
             end
-                        
-            if not decided and p.REQUIRE_TRAINING_ERR_MINIMUM and not (train_err_below_change_threshold or test_err_stopped_decreasing) then
-                self.satisfiedStopCriterion = false
-                self.reason = string.format('Training (or testing) error is still decreasing (changed by %.3f%% in the last epoch)', self.dTrainErr_frac[nEpochs]*100)
-                decided = true
-            end
             
-            if not decided and p.REQUIRE_COST_MINIMUM and not cost_below_change_threshold then
-                self.satisfiedStopCriterion = false
-                self.reason = string.format('Cost function still decreasing (changed by %.3f%% in the last epoch)', self.dCost_frac[nEpochs]*100)
+            
+            
+            -- 2. conditions for training a classifier (have trainining & test error)
+            if p.trainingClassifier then
+                
+                -- if test error is 0 --> STOP
+                if not decided and (self.testErr[nEpochs] == 0 and p.STOP_IF_ZERO_TEST_ERROR ) then 
+                    self.satisfiedStopCriterion = true
+                    self.reason = 'training a classifier and test error is zero'
+                    self.trainingState = 'SGD'
+                    decided = true
+                
+                end
+                
+                -- if training error stopped decreasing --> STOP
+                if not decided and train_err_below_change_threshold then --and not p.REQUIRE_TRAINING_ERR_MINIMUM then
+                    self.satisfiedStopCriterion = true
+                    self.reason = string.format('Training error changed by only %.3f%% (< threshold of %.3f%%) ', self.dTrainErr_frac[nEpochs]*100, p.TRAIN_ERR_CHANGE_FRAC_THRESH*100 )
+                    decided = true
+                end
+          
+                -- if test error stopped decreasing over last N epochs --> STOP
+                if not decided and test_err_stopped_decreasing then
+                    self.satisfiedStopCriterion = true
+                    self.reason = string.format('Test error hasnt improved since epoch %d (ie. %d epochs ago, > threshold of %d) ', 
+                        minTestError_epoch, nEpochs - minTestError_epoch, p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN )
+                    decided = true
+                end
+          
+                --> training error still decreasing --> CONTINUE
+                if not decided and p.REQUIRE_TRAINING_ERR_MINIMUM and not 
+                    (train_err_below_change_threshold or (self.trainingClassifier and test_err_stopped_decreasing)) then
+                    self.satisfiedStopCriterion = false
+                    self.reason = string.format('Training (or testing) error is still decreasing (changed by %.3f%% in the last epoch)', self.dTrainErr_frac[nEpochs]*100)
+                    decided = true
+                end
+            
+            end
+        
+            --2. conditions for training a regression model (no training & test error) OR a classifier
+            --if not p.trainingClassifier then -- eg regresssion
+            
+            --> cost stopped decreasing --> STOP
+            if not decided and p.REQUIRE_COST_MINIMUM and cost_below_change_threshold then  -- have stopped decreasing
+                self.satisfiedStopCriterion = true
+                self.reason = string.format('Cost function has stopped decreasing (changed by only %.3f%% in the last epoch)',
+                    self.dCost_frac[nEpochs]*100)
                 print(self.reason)
                 decided = true
             end
 
-            if not decided and train_err_below_change_threshold then
-                self.satisfiedStopCriterion = true
-                self.reason = string.format('Training error changed by only %.3f%% (< threshold of %.3f%%) ', self.dTrainErr_frac[nEpochs]*100, p.TRAIN_ERR_CHANGE_FRAC_THRESH*100 )
+            --> cost still decreasing --> CONTINUE
+            if not decided and p.REQUIRE_COST_MINIMUM and not cost_below_change_threshold then -- still decreasing
+                self.satisfiedStopCriterion = false
+                self.reason = string.format('Cost function still decreasing (changed by %.3f%% in the last epoch)',
+                    self.dCost_frac[nEpochs]*100)
+                print(self.reason)
+                decided = true
+            end
+                
             
-            elseif not decided and cost_below_change_threshold then
+            --[[
+            print('decided', decided)
+            print('REQUIRE_COST_MINIMUM', p.REQUIRE_COST_MINIMUM)            
+            print('cost_below_change_threshold', cost_below_change_threshold)
+            error('!')
+--]]
+            if not decided and cost_below_change_threshold then
                 self.satisfiedStopCriterion = true
                 self.reason = string.format('Cost function changed by only %.3f%% (< threshold of %.3f%%) ',
                     self.dCost_frac[nEpochs]*100, p.COST_CHANGE_FRAC_THRESH*100 )
-                
-            elseif not decided and test_err_stopped_decreasing then
-                self.satisfiedStopCriterion = true
-                self.reason = string.format('Test error hasnt improved since epoch %d (ie. %d epochs ago, > threshold of %d) ', 
-                    minTestError_epoch, nEpochs - minTestError_epoch, p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN )
-            end
-                
-            
-            if self.forcingContinue then
-                self.satisfiedStopCriterion = false
-                self.reason = 'forcing continuation of training...'
+                decided = true
             end
             
+  
         end
         --[[
         elseif self.trainingState == 'L-BFGS' then

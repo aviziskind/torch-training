@@ -5,7 +5,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     verbose = true
     local showTrainTestTime = false
     local trainOnIndividualPositions = trainingOpts.trainOnIndividualPositions
-    local redoTrainingAlways = trainingOpts.redoTraining --or true
+    local redoTrainingAlways = trainingOpts.redoTraining or false
     local redoTrainingIfOld = true
     --local redoTrainingIfOld_date = 1444887467 
     local redoTrainingIfOld_date = 1402977793 -- (6/15, late) --  1402928294 --(6/15)      --1393876070 -- os.time()
@@ -29,19 +29,34 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local nEpochsDone = 0
     local batchSize = trainingOpts.BATCH_SIZE or 1
     local groupBatch = model_struct.parameters.convFunction and string.find(model_struct.parameters.convFunction, 'CUDA')
-    local trainOnGPU = model_struct.parameters.trainOnGPU
-    local prev_loss = 0
-    local prev_trainErr_pct = 100
-    local prev_testErr_pct
-    local nClasses = trainData.nClasses
+    local trainOnGPU = model_struct.parameters.trainOnGPU or trainingOpts.trainOnGPU
+    local nOutputs = trainData.nClasses  or trainData.nOutputs
     
     local memoryAvailableBuffer_MB = trainingOpts.memoryAvailableBuffer or 3000 --- dont leave less than this amount of memory available
     
+    local criterion = model_struct.criterion
+    local trainingClassifier = torch.isClassifierCriterion(torch.typename(criterion))
+    trainingOpts.trainingClassifier = trainingClassifier
+    
+    local require_cost_minimum = false
+    if not trainingClassifier then
+        require_cost_minimum = true
+    end
+    
+    if trainOnGPU then
+        model_struct.model = model_struct.model:cuda()
+        model_struct.criterion = model_struct.criterion:cuda()
+    else
+        --model_struct.model = model_struct.model:float()
+        --model_struct.criterion = model_struct.criterion:float()
+    end
+    
+    
     if trainOnIndividualPositions then
-        nClasses = nClasses * trainData.nPositions                
+        nOutputs = nOutputs * trainData.nPositions                
     end
 
-    local trainConfusionMtx = optim.ConfusionMatrix(nClasses)
+    local trainConfusionMtx = optim.ConfusionMatrix(nOutputs)
     
     
     local resizeInputToVector = model_struct.parameters.resizeInputToVector or false
@@ -50,15 +65,18 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     local csvLogFile   = trainingFileBase .. '.csv'    
     local torchLogFile = trainingFileBase .. '.t7'
+    local trainingDir = paths.dirname(trainingFileBase)
         
     if redoTrainingAlways then
         io.write('\n === Warning -- retraining ALL models ===\n')
     end 
         
-    local trainingOpts_default = {MIN_EPOCHS = 5, MAX_EPOCHS = 500, EXTRA_EPOCHS = 0, 
+    --local trainingOpts_default = {MIN_EPOCHS = 1000, MAX_EPOCHS = 2000, EXTRA_EPOCHS = 0, 
+    local trainingOpts_default = {MIN_EPOCHS = 10, MAX_EPOCHS = 100, EXTRA_EPOCHS = 0, 
         SWITCH_TO_LBFGS_AT_END = false, SAVE_TRAINING = true, 
-        TEST_ERR_NEPOCHS_STOP_AFTER_MIN = 10} 
+        TEST_ERR_NEPOCHS_STOP_AFTER_MIN = 10, REQUIRE_COST_MINIMUM = require_cost_minimum} 
     
+    --print(trainingOpts_default)
     for k,v in pairs(trainingOpts_default) do
         if not trainingOpts[k] then
             trainingOpts[k] = v
@@ -67,7 +85,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     local trainingLogger = optim.TrainingLogger(trainingOpts)    
     trainingLogger:setFile(torchLogFile)
-    
+        
 
     local sgd_config_default = {
         learningRate = 1e-3,
@@ -168,13 +186,13 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         nEpochsDone      = trainingLogger.nEpochs
         model_struct     = trainingLogger.model_struct
                 
-        prev_loss        = trainingLogger:currentLoss()
+        prev_train_loss        = trainingLogger:currentLoss()
         prev_trainErr_pct = trainingLogger:currentTrainErr()
         prev_testErr_pct = trainingLogger:currentTestErr()
         
         
         io.write(string.format('   Currently at epoch %d: Cost = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
-                nEpochsDone, prev_loss, prev_trainErr_pct, prev_testErr_pct))
+                nEpochsDone, prev_train_loss, prev_trainErr_pct, prev_testErr_pct))
         
         continueTraining, trainingAlgorithm, reasonToStopTraining = trainingLogger:continue()
         
@@ -202,22 +220,34 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
 
 
     --model = model_struct.model
-    local criterion = model_struct.criterion
+   
     
-    local label_field = 'labels'
-    if trainOnIndividualPositions then
-        label_field = 'labels_indiv_pos'
+    local output_field 
+    if trainingClassifier then
+        output_field = 'labels'
+        --output_field = 'outputMatrix'
+        if trainOnIndividualPositions then
+            output_field = 'labels_indiv_pos'
+        end
+    else
+        output_field = 'outputMatrix'
     end
+    
 
-    local orig_trainInputs = trainData.inputMatrix    
+    local orig_trainInputs = trainData.inputMatrix
+        
+    
     local nTrainingSamples = orig_trainInputs:size(1)
-    local trainingLabels  = trainData[label_field]
+    local trainingOutputs  = trainData[output_field]
     
+    TrainData = trainData
+    F = output_field
     
-    local orig_testInputs, nTestSamples
+    local orig_testInputs, nTestSamples, testingOutputs
     if haveTestData then
         orig_testInputs = testData.inputMatrix
         nTestSamples = orig_testInputs:size(1)    
+        testingOutputs = testData[output_field]
     end
 
 
@@ -225,13 +255,13 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local nTrainingSamples_full = nTrainingSamples
     local maxSizeInput_MB
     if onLaptop then
-        maxSizeInput_MB = 1000 -- = ~1GB
+        maxSizeInput_MB = 2000 -- = ~1GB
     else
         maxSizeInput_MB = 10000 -- = ~10GB
     end
     local usePreExtractedFeatures = false
     
-    local model_toTrain, model_forTest, trainInputs, trainData_use, testInputs, testData_use, feat_extractor, classifier, feat_extr_nOutputs
+    local model_toTrain, model_struct_forTest, model_forTest, trainInputs, trainData_use, testInputs, testData_use, feat_extractor, classifier, feat_extr_nOutputs
     MS = model_struct
     TOrig = orig_trainInputs;
     
@@ -239,7 +269,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     model_toTrain = model_struct.model
     model_forTest = model_struct.model
     
+    
     trainInputs = orig_trainInputs
+    TrainInputs = trainInputs
     trainData_use = trainData
     if haveTestData then
         testInputs  = orig_trainInputs
@@ -277,7 +309,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             
         -- double check that new features can be successfully passed to the classifier
         local sample_outputFromClass = classifier:forward(sample_outputFromFeat)
-        assert( torch.nElements( sample_outputFromClass )  == nClasses)
+        assert( torch.nElements( sample_outputFromClass )  == nOutputs)
 
 
 
@@ -319,8 +351,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             
                             
             trainInputs = newTrainInputs
-            trainData_use = {inputMatrix = trainInputs, labels = trainingLabels,      
-                             nInputs = feat_extr_nOutputs, nClasses = trainData.nClasses, nPositions = trainData.nPositions} 
+            trainData_use = {inputMatrix = trainInputs, [output_field] = trainingOutputs,      
+                             nInputs = feat_extr_nOutputs, nOutputs = nOutputs, nPositions = trainData.nPositions} 
                 
             if haveTestData then
                 print(string.format('Creating new test input tensor (%d x %d) (%.1f MB)',  nTestSamples, feat_extr_nOutputs, sizeOfNewTestInputs_MB ))
@@ -340,8 +372,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 progressBar.done()
         
                 testInputs = newTestInputs
-                testData_use  = {inputMatrix = testInputs, labels=testData[label_field], 
-                                nInputs = feat_extr_nOutputs, nClasses = testData.nClasses, nPositions = testData.nPositions}
+                testData_use  = {inputMatrix = testInputs, [output_field]=testingOutputs, 
+                                nInputs = feat_extr_nOutputs, nOutputs = nOutputs, nPositions = testData.nPositions}
             end
         end
         
@@ -351,6 +383,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     --Model = model_struct
     TrainData = trainData_use
     MTrain = model_toTrain
+    
+    -- if freezeFeatures, model_forTest will be updated to be just the classifier
+    model_struct_forTest = {model = model_forTest, criterion=criterion, modelType = 'model_struct'}
     --TrainData_use = trainData_use
     --print('GetParameters')
     local parameters, gradParameters = model_toTrain:getParameters()
@@ -373,8 +408,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local checkForNan = false
     
                 if debug then
-                    print(string.format('first labels %d, %d, %d, %d, %d\n', trainingLabels[trainingIdxs[1]], trainingLabels[trainingIdxs[2]], 
-                            trainingLabels[trainingIdxs[3]], trainingLabels[trainingIdxs[4]], trainingLabels[trainingIdxs[5]] ))
+                    print(string.format('first labels %d, %d, %d, %d, %d\n', trainingOutputs[trainingIdxs[1]], trainingOutputs[trainingIdxs[2]], 
+                            trainingOutputs[trainingIdxs[3]], trainingOutputs[trainingIdxs[4]], trainingOutputs[trainingIdxs[5]] ))
                 end
     _idx_ = 0
     -- define closure to calculate cost/gradient of cost function 
@@ -408,11 +443,11 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                     --io.write(string.format('[[[E:%d]]]', nEpochsDone+1))
                 end
                     
-                local input = trainInputs[trainingIdxs[_idx_]]    
+                input = trainInputs[trainingIdxs[_idx_]]    
                 if freezeFeatures and not usePreExtractedFeatures then   -- extract features now to pass the the (trainable) classifier
                     input = feat_extractor:forward(input)
                 end
-                local target = trainingLabels[trainingIdxs[_idx_]]  
+                target = trainingOutputs[trainingIdxs[_idx_]]  
                     
                 if resizeInputToVector then           -- even if model already reshapes input, 
                     input = input:resize(nInputFeats)  -- model:backward needs vector for simple networks
@@ -420,10 +455,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 Model_toTrain = model_toTrain
 
                 local output = model_toTrain:forward(input, target)
-                local nOutputs = output:numel()                
+                local nOutputsThisTime = output:numel()                
                                 
                 assert(output:dim() == 1)
-                assert(nOutputs == nClasses)
+                assert(nOutputsThisTime == nOutputs)
                                             
                 if output:dim() > 1 then
                     output = output:resize(nOutputs)
@@ -433,7 +468,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                                 
                 model_toTrain:backward(input, criterion:backward(output, target))
                 
-                trainConfusionMtx:add(output,target)          
+                if trainingClassifier then
+                    trainConfusionMtx:add(output,target)          
+                end
 
             end
             
@@ -460,7 +497,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             if freezeFeatures and not usePreExtractedFeatures then
                 inputs = feat_extractor:forward(inputs)
             end
-            local targets = selectInputBatch(trainingLabels, sampleIdxs)
+            local targets = selectInputBatch(trainingOutputs, sampleIdxs)
 
             --inputs = trainInputs[{{batchIndices}}]
             
@@ -472,10 +509,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                         
             local outputs = model_toTrain:forward(inputs)
             assert(outputs:size(1) == nThisBatch)
-            assert(outputs:size(2) == nClasses)
+            assert(outputs:size(2) == nOutputs)
             
             --local input = trainInputs[trainingIdxs[_idx_]]                                    
-            --local target = trainingLabels[trainingIdxs[_idx_]]  
+            --local target = trainingOutputs[trainingIdxs[_idx_]]  
 
             --if resizeInputToVector then           -- even if model already reshapes input, 
             --    input = input:resize(nInputFeats)  -- model:backward needs vector for simple networks
@@ -490,7 +527,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 loss = loss + criterion:forward(outputs[i], targets[i])
                 -- estimate df/dW
                 df_do[i] = criterion:backward(outputs[i], targets[i])
-                trainConfusionMtx:add(outputs[i],targets[i])          
+                if trainingClassifier then
+                    trainConfusionMtx:add(outputs[i],targets[i])          
+                end
 
             end
             --model:backward(inputs, df_do:cuda())
@@ -525,7 +564,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     local logger
     if trainingOpts.SAVE_TRAINING then
-        paths.createFolder(training_dir)
+        
+        paths.createFolder(trainingDir)
         
         logger = optim.Logger2(csvLogFile, logger_open_mode)
     end
@@ -572,7 +612,11 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     end
     --print(trainingLogger.params)
                 
-    local current_loss, curr_trainErr_pct, fs, curr_testErr_pct
+    local current_train_loss, prev_train_loss, train_loss_change_pct = 0,0,0
+    local current_test_loss, prev_test_loss, test_loss_change_pct = 0,0,0
+    local curr_trainErr_pct, prev_trainErr_pct, trainErr_pct_change_pct = 100, 100, 100
+    local fs, curr_testErr_pct, prev_testErr_pct, testErr_pct_change_pct = 100, 100, 100
+
     
                 if debug then
                     if T_saved then
@@ -586,15 +630,20 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                     end
                end
    
-    local checkErrBeforeStart = false
+    local checkErrBeforeStart = true
     if checkErrBeforeStart then
-        curr_trainErr_pct, _, current_loss = testModel(model_forTest, trainData_use, {getLoss = true, batchSize = batchSize})        
+        curr_trainErr_pct, _, current_train_loss = testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})        
+        prev_train_loss = current_train_loss
         --curr_trainErr_pct2 = testModel(model_toTrain, trainData_use)        
         --assert(curr_trainErr_pct2 == curr_trainErr_pct)
-        curr_testErr_pct = testModel(model_forTest, testData_use, {batchSize = batchSize})        
+        curr_testErr_pct, _, current_test_loss = testModel(model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize})        prev_test_loss = current_test_loss
         
-        io.write(string.format('   Quick check: Loss = %.4f, TrainErr = %.2f. TestErr = %.1f\n', 
-                    current_loss, curr_trainErr_pct, curr_testErr_pct))
+        io.write(string.format('   Quick check: Train Loss = %.4f, Test Loss = %.4f, TrainErr = %.2f. TestErr = %.1f\n', 
+                    current_train_loss, current_test_loss, curr_trainErr_pct, curr_testErr_pct))
+        prev_train_loss = current_train_loss
+        prev_test_loss = current_test_loss
+        prev_trainErr_pct = curr_trainErr_pct
+        prev_testErr_pct = curr_testErr_pct
     end
     
     
@@ -631,19 +680,24 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             batchSize = trainingOpts.BATCH_SIZE or 1
             progressBar.init(nTrainingSamples, progressBar_nStars) --- progressbar for SGD
         
-            trainConfusionMtx:zero()
+            if trainingClassifier then
+                trainConfusionMtx:zero()
+            end
                             
             local startTime = os.time()
-            current_loss = do_SGD_Loop()
+            current_train_loss = do_SGD_Loop()
             progressBar.done()
-                   
-            trainConfusionMtx:updateValids()
-            curr_trainErr_pct = (1-trainConfusionMtx.totalValid)*100   --trainError = testModel(model, testData)        
-
+            
+            current_train_loss = current_train_loss / nTrainingSamples
+           
+            if trainingClassifier then
+                trainConfusionMtx:updateValids()
+                curr_trainErr_pct = (1-trainConfusionMtx.totalValid)*100   --trainError = testModel(model, testData)        
+            end
         elseif (trainingAlgorithm == 'L-BFGS') or (trainingAlgorithm == 'L-BFGS-reduced') then
             if (trainingAlgorithm == 'L-BFGS-reduced') then
                 nTrainingSamples = math.floor(nTrainingSamples_full * trainingOpts.LBFGS_REDUCED_FRAC)
-
+    
             elseif (trainingAlgorithm == 'L-BFGS') then
                 nTrainingSamples = nTrainingSamples_full    
             end
@@ -654,9 +708,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             --_, fs = optim.lbfgs_cuda(feval, parameters, lbfgs_params)
             --_, fs = optim.lbfgs(feval, parameters, lbfgs_params)
             _, fs = lbfgs_func(feval, parameters, lbfgs_params)
-            current_loss = fs[1]
+            current_train_loss = fs[1]
     
-            curr_trainErr_pct = testModel(model_forTest, trainData_use, {verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize}) -- L-BFGS does multiple loops
+            curr_trainErr_pct = testModel(model_struct_forTest, trainData_use, {verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize}) -- L-BFGS does multiple loops
                 
         end
        
@@ -667,28 +721,33 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         end
 
 
-       
         nEpochsDone = nEpochsDone + 1;
         
-        local loss_change_pct = (current_loss - prev_loss)/prev_loss * 100
-        prev_loss = current_loss;
- 
-        local t_elapsed_sec = 0
-        local trainErr_pct_change_pct = (curr_trainErr_pct - prev_trainErr_pct)/prev_trainErr_pct*100 
-        prev_trainErr_pct = curr_trainErr_pct
+     
         
-        if haveTestData then
-            curr_testErr_pct, _, _, t_elapsed_sec = 
-                testModel(model_forTest, testData_use, {verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize})        
-        else
-            curr_testErr_pct = 0
-        end
+        
+            local t_elapsed_sec = 0
+            local trainErr_pct_change_pct = (curr_trainErr_pct - prev_trainErr_pct)/prev_trainErr_pct*100 
+            prev_trainErr_pct = curr_trainErr_pct
+            
+            if haveTestData then
+                curr_testErr_pct, _, current_test_loss, t_elapsed_sec = 
+                    testModel(model_struct_forTest, testData_use, {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize})        
+            else
+                curr_testErr_pct = 0
+            end
+        
+        train_loss_change_pct = (current_train_loss - prev_train_loss)/prev_train_loss * 100
+        prev_train_loss = current_train_loss;
+
+        test_loss_change_pct = (current_test_loss - prev_test_loss)/prev_test_loss * 100
+        prev_test_loss = current_test_loss;
         
         --io.write('[print]')
         
         --io.write('[add\n');
         
-        trainingLogger:add(nEpochsDone, model_struct, current_loss, curr_trainErr_pct, curr_testErr_pct, timeForThisEpoch)
+        trainingLogger:add(nEpochsDone, model_struct, current_train_loss, curr_trainErr_pct, curr_testErr_pct, timeForThisEpoch)
         --io.write(']')
         
         
@@ -699,13 +758,13 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         
         local checkErrAfterEachEpoch = false
         if checkErrAfterEachEpoch then
-            local curr_trainErr_pct_after, _, current_loss_after = testModel(model_forTest, trainData_use, {getLoss = true, batchSize = batchSize})
+            local curr_trainErr_pct_after, _, current_train_loss_after = testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})
             --local curr_trainErr_pct_after2 = testModel(model_toTrain, trainData_use)
             --assert(curr_trainErr_pct_after == curr_trainErr_pct_after2)
-            local curr_testErr_pct_after = testModel(model_forTest, testData_use, {batchSize = batchSize})        
+            local curr_testErr_pct_after, _, current_test_loss_after = testModel(model_struct_forTest, testData_use, {batchSize = batchSize})        
             
-            io.write(string.format('   Quick check: Loss = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
-                        current_loss_after, curr_trainErr_pct_after, curr_testErr_pct_after))
+            io.write(string.format('   Quick check: TrainLoss = %.4f. TestLoss = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
+                        current_train_loss_after, current_test_loss_after, curr_trainErr_pct_after, curr_testErr_pct_after))
         end
 
         
@@ -717,7 +776,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             io.write(string.format('done:%s]', sec2hms(t_elapsed)))
             
             logger:add{['Epoch'] = nEpochsDone}        
-            logger:add{['Cost'] = current_loss}
+            logger:add{['Cost'] = current_train_loss}
             logger:add{['Train Err'] = curr_trainErr_pct}
             logger:add{['Test Err'] = curr_testErr_pct}
             logger:add{['Time'] = timeForThisEpoch}
@@ -733,8 +792,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         model_struct.trainingDate = os.time()
 
         local timeForThisEpoch_tot = os.time() - startTime
-        io.write(string.format('   after epoch %d: Cost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n\n', 
-                nEpochsDone, current_loss, loss_change_pct, curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, sec2hms(timeForThisEpoch_tot)))
+        io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n\n', 
+                nEpochsDone, current_train_loss, train_loss_change_pct, current_test_loss, test_loss_change_pct, 
+                    curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, sec2hms(timeForThisEpoch_tot)))
 
 
         --error('!')
@@ -760,6 +820,7 @@ end
 
 --testModel = function(model_struct, testData, verbose, getLoss)
 testModel = function(model_struct, testData, opt)
+    MS =model_struct
     assert(#testData == 0)
     Tm = testData
     opt = opt or {}
@@ -767,7 +828,7 @@ testModel = function(model_struct, testData, opt)
     local getLoss = opt.getLoss or false
     local multipleLabels = opt.multipleLabels or false
     local test_indiv_pos = opt.test_indiv_pos or false
-    local nClasses = testData.nClasses
+    local nOutputs = testData.nClasses or testData.nOutputs
     local returnPctCorrect = opt.returnPctCorrect or false 
     
 
@@ -786,29 +847,39 @@ testModel = function(model_struct, testData, opt)
         batchSize = opt.batchSize
     end
 
+
+    local trainingClassifier = torch.isClassifierCriterion(torch.typename(model_struct.criterion))
+    local output_field 
+    if trainingClassifier then
+        output_field = 'labels'
+        --output_field = 'outputMatrix'
+        if test_indiv_pos then
+            output_field = 'labels_indiv_pos'
+            nOutputs = nOutputs * testData.nPositions
+        end
+    else
+        output_field = 'outputMatrix'
+    end
+
     
-    local useConfusionMatrix = true and not multipleLabels
+    
+    local useConfusionMatrix = true and trainingClassifier and not multipleLabels
     
 	local testInputs = testData.inputMatrix
 
-    local labels_field = 'labels'
-    if test_indiv_pos then
-        labels_field = 'labels_indiv_pos'
-        nClasses = nClasses * testData.nPositions
-    end
-	local labels = testData[labels_field]
+	local outputs = testData[output_field]
     local haveSecondLabels = testData.labels_distract ~= nil   -- for testing with multiple labels
     local haveThirdLabels  = testData.labels_distract2 ~= nil
 
     local testConfusionMtx
     if useConfusionMatrix then
-        testConfusionMtx = optim.ConfusionMatrix(nClasses)
+        testConfusionMtx = optim.ConfusionMatrix(nOutputs)
         testConfusionMtx:zero()
     end
 
     
     --testInputs_copy
-	
+	i = 0;
     if verbose then
         --print('==> testing ')
     end
@@ -822,12 +893,12 @@ testModel = function(model_struct, testData, opt)
         if model_struct.criterion then
             criterion = model_struct.criterion
         else
-            criterion = nn.ClassNLLCriterion();
+            error('No Criterion in model_struct')
         end
     end
     
     TestInputs = testInputs
-    Labels = labels
+    Outputs = outputs
     M = model
     
     
@@ -840,61 +911,105 @@ testModel = function(model_struct, testData, opt)
         local idxs = { (batch_i-1) * batchSize +1,  math.min(batch_i * batchSize, nTestSamples) } 
         local nThisBatch = idxs[2] - idxs[1] + 1
         
+        Idxs = idxs
         local preds, targets
         
         if groupBatch then        
             preds = model:forward(testInputs[{ idxs }])
             --Preds = M:forward(TestInputs[{ idxs }])
-            targets = labels[{idxs}] 
+            targets = outputs[{idxs}] 
         else
             preds = model:forward(testInputs[{ idxs[1] }])
-            targets = labels[{idxs[1]}] 
+            targets = outputs[{idxs[1]}] 
         end
         
+        P = preds
+        T = targets
         
         for samp_i = 1, nThisBatch do
+            
+          
+        
             if preds:dim() == 1 then
             --if groupBatch and nThisBatch > 1 then
                 pred = preds
             else 
                 pred = preds[samp_i]
             end
-            if type(targets) == 'number' then
-                target = targets
-            else
-                target = targets[samp_i]
-            end            
         
-            if useConfusionMatrix then
-                --Pred = pred
-                --Target = target
-                --CMtx = testConfusionMtx
-                testConfusionMtx:add(pred,target)
             
-            else
+            if trainingClassifier then
+        
+                if type(targets) == 'number' then
+                    target = targets
+                else
+                    target = targets[samp_i]
+                end            
+        
+                if useConfusionMatrix then
+                    --Pred = pred
+                    --Target = target
+                    --CMtx = testConfusionMtx
+                    testConfusionMtx:add(pred,target)
+                
+                else
 
-                local idx_sample  = idxs[1] + samp_i - 1
-                _,idx_max = torch.max(pred:resize(nClasses), 1)
-                --local _,idx_max = torch.max(pred, 1)
+                    local idx_sample  = idxs[1] + samp_i - 1
+                    _,idx_max = torch.max(pred:resize(nOutputs), 1)
+                    --local _,idx_max = torch.max(pred, 1)
 
-                if idx_max[1] == testData.labels[idx_sample] then
-                    nCorrect = nCorrect + 1
-                elseif multipleLabels and
-                    (haveSecondLabels and (idx_max[1] == testData.labels_distract[idx_sample])) or
-                    (haveThirdLabels  and (idx_max[1] == testData.labels_distract2[idx_sample])) then
+                    if idx_max[1] == testData.labels[idx_sample] then
                         nCorrect = nCorrect + 1
-                end
-            
+                    elseif multipleLabels and
+                        (haveSecondLabels and (idx_max[1] == testData.labels_distract[idx_sample])) or
+                        (haveThirdLabels  and (idx_max[1] == testData.labels_distract2[idx_sample])) then
+                            nCorrect = nCorrect + 1
+                    end
+                end        
+            else
+                target = targets
             end
-            
+        
+           
             if getLoss then
+                i = i + 1
+                --io.write('^');
+                P1 = pred
+                T1 = target
+                C = criterion
+                lossBefore = loss
+                toAdd = criterion:forward(pred, target)
+                if toAdd ~= toAdd then
+                    error('got a nan')
+                end
                 loss = loss + criterion:forward(pred, target)
+                
+                
             end
+       
+            
             
         end
         
 	end
     
+    if verbose then
+        local totalTime = toc()
+        local timeEachSample_sec = (totalTime / nTestSamples)
+        io.write(string.format('\n [test]: %.2f ==> Total time: %.3f sec. Time for each sample = %.3f ms. \n', 
+                testErr_pct_total, totalTime, timeEachSample_sec *1000))
+        --print(testConfusionMtx)
+    end
+
+    local t_elapsed = toc()
+    
+    if getLoss then
+        loss = loss / nTestSamples
+    end
+
+    if not trainingClassifier then
+        return 0, 0, loss
+    end
     
     
     local testErr_pct_total,     testCorrect_pct
@@ -912,25 +1027,11 @@ testModel = function(model_struct, testData, opt)
     else
     
         testErr_pct_total = (nTestSamples - nCorrect) / nTestSamples * 100
-        testErr_pct_eachClass = torch.Tensor(nClasses):zero()
+        testErr_pct_eachClass = torch.Tensor(nOutputs):zero()
     
     end
-    
 
-    if getLoss then
-        loss = loss / nTestSamples
-    end
-
-
-    if verbose then
-        local totalTime = toc()
-        local timeEachSample_sec = (totalTime / nTestSamples)
-        io.write(string.format('\n [test]: %.2f ==> Total time: %.3f sec. Time for each sample = %.3f ms. \n', 
-                testErr_pct_total, totalTime, timeEachSample_sec *1000))
-        --print(testConfusionMtx)
-    end
-
-    local t_elapsed = toc()
+  
         
     
     if returnPctCorrect then
@@ -1014,7 +1115,7 @@ getPercentCorrect = function()
         local target_1 = targets[i][1]
 
         hyp_1 = model:forward(input_1, target_1)
-        _,idx_max = torch.max(hyp_1:resize(nClasses), 1)
+        _,idx_max = torch.max(hyp_1:resize(nOutputs), 1)
 
         if idx_max[1] == target_1 then
             nCorrect = nCorrect + 1
@@ -1169,5 +1270,16 @@ retrain load
                 end
 --]]
             
+            ---[[
             
-            
+torch.isClassifierCriterion = function (criterionName)
+    if criterionName == 'nn.ClassNLLCriterion' then
+        return true
+    elseif criterionName == 'nn.MSECriterion' or criterionName == 'nn.mycri' or criterionName == 'nn.mycri_kai' then
+        return false
+    else
+        error('Unknown criterion name')
+    end
+
+end
+--]]

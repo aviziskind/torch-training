@@ -317,7 +317,7 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     if not isequal_upTo(networkOpts.filtSizes, defaultParams.filtSizes, nConvLayers) then        
         if isequal_upTo(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
             filtSizes_str = '_nofilt'
-        elseif length(table.nUnique(networkOpts.filtSizes)) == 1 then
+        elseif (table.nUnique(networkOpts.filtSizes)) == 1 then   --- XXX
             filtSizes_str = '_fs' .. networkOpts.filtSizes[1]
         else
             filtSizes_str = '_fs' .. abbrevList(networkOpts.filtSizes)
@@ -333,7 +333,7 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         if not isequal_upTo(networkProp, defaultProp, nConvLayers) then        
             if isequal_upTo(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
                 property_str = '_' .. str_NA
-            elseif length(table.nUnique(networkOpts.filtSizes)) == 1 then
+            elseif (table.nUnique(networkOpts.filtSizes)) == 1 then   --- XXX
                 property_str = '_' .. fldAbbrev .. networkProp[1]
             else
                 property_str = '_' .. fldAbbrev .. abbrevList(networkProp)
