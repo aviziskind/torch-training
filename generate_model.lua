@@ -30,6 +30,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         
     local params = {}
     --input layer 
+    
     if networkOpts.netType == 'MLP'  then
 
         local nHiddenUnitsEachLayer = networkOpts.nHiddenUnits
@@ -74,7 +75,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         
     elseif networkOpts.netType == 'ConvNet' then
 
-        networkOpts = fixConvNetParams(networkOpts)
+        local defaultNetworkName = networkOpts.defaultNet
+        networkOpts = fixConvNetParams(networkOpts, defaultNetworkName)
         --NetworkOpts = networkOpts
         
         local nInputPlanes = 1 
@@ -90,12 +92,11 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         --local useConnectionTable = useConnectionTable_default and not trainOnGPU
         --params.enforceStridePoolSizeEqual = trainOnGPU
         local n = networkOpts
-        local convFunction, fanin, filtSizes, doPooling, poolSizes, poolTypes, poolStrides, trainOnGPU = 
+        local convFunction,   fanin,   filtSizes,   doPooling,   poolSizes,   poolTypes,   poolStrides,   trainOnGPU = 
             n.convFunction, n.fanin, n.filtSizes, n.doPooling, n.poolSizes, n.poolTypes, n.poolStrides, n.trainOnGPU
         
         local doSpatSubtrNorm,   spatSubtrNormType,   spatSubtrNormWidth,   doSpatDivNorm,   spatDivNormType,   spatDivNormWidth = 
             n.doSpatSubtrNorm, n.spatSubtrNormType, n.spatSubtrNormWidth, n.doSpatDivNorm, n.spatDivNormType, n.spatDivNormWidth
-            
            
         
         if convFunction == 'SpatialConvolutionMap' and trainOnGPU then
@@ -209,16 +210,15 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 nOut_pool_w[layer_i] = nOut_conv_w[layer_i]            
             end
          
- 
-            local doSpatSubtrNorm_thisLayer = doSpatSubtrNorm and string.lower(spatSubtrNormType[i]) ~= 'none'
+            local doSpatSubtrNorm_thisLayer = doSpatSubtrNorm and string.lower(spatSubtrNormType[layer_i]) ~= 'none'
             if doSpatSubtrNorm_thisLayer then
-                local norm_kernel = getNormKernel(spatSubtrNormType[i], spatSubtrNormWidth[i])
+                local norm_kernel = getNormKernel(spatSubtrNormType[layer_i], spatSubtrNormWidth[layer_i])
                 feat_extractor:add( nn.SpatialSubtractiveNormalization(nStatesConv[layer_i], norm_kernel ) )
             end
             
-            local doSpatDivNorm_thisLayer   = doSpatDivNorm  and string.lower(spatDivNormType[i]) ~= 'none' 
+            local doSpatDivNorm_thisLayer   = doSpatDivNorm  and string.lower(spatDivNormType[layer_i]) ~= 'none' 
             if doSpatDivNorm_thisLayer then
-                local norm_kernel = getNormKernel(spatDivNormType[i], spatDivNormWidth[i])
+                local norm_kernel = getNormKernel(spatDivNormType[layer_i], spatDivNormWidth[layer_i])
                 feat_extractor:add( nn.SpatialSubtractiveNormalization(nStatesConv[layer_i], norm_kernel ) )
             end
             --]]
@@ -502,25 +502,54 @@ networkHash = function(model, includeOutputFields, includeGradFields)
 end
 
 
-getDefaultConvNetParams = function()
+getDefaultConvNetParams = function(defaultNetworkName)
+    assert(defaultNetworkName)
+    defaultNetworkName = defaultNetworkName or 'LeNet'
         
     local params = {}
-    params.nStatesConv = {6,16}
-    params.nStatesFC = {120}    
-    params.convFunction = 'SpatialConvolutionMap'
+    if defaultNetworkName == 'LeNet' then
     
-    params.fanin = {1,4,16}
-    params.filtSizes = {5,4}
+        params.netType = 'ConvNet'
+        params.defaultNet = defaultNetworkName
+        params.nStatesConv = {6,16}
+        params.nStatesFC = {120}    
+        params.convFunction = 'SpatialConvolutionMap'
+        
+        params.fanin = {1,4,16}
+        params.filtSizes = {5,4}
 
-    params.doPooling = true
-    params.poolSizes = {4,2}
-    params.poolTypes = {2,2}
-    params.poolStrides = 'auto' --{2,2}
+        params.doPooling = true
+        params.poolSizes = {4,2}
+        params.poolTypes = {2,2}
+        params.poolStrides = 'auto' --{2,2}
 
-    params.doSpatSubtrNorm = false
-    params.doSpatDivNorm = false    
+        params.doSpatSubtrNorm = false
+    
+    elseif defaultNetworkName == 'FHWA_default' then
+    
+        params.netType = 'ConvNet'
+        params.defaultNet = defaultNetworkName
+        params.nStatesConv = {128,256,512,512}
+        params.nStatesFC = {1024}    
+        params.convFunction = 'SpatialConvolutionMap'
+        
+        params.fanin = {1,4,4,4}
+        params.filtSizes = {9,9,9,5}
 
-    return params
+        params.doPooling = true
+        params.poolSizes = {2}
+        params.poolTypes = {2}
+        params.poolStrides = 'auto' --{2,2}
+
+        params.doSpatSubtrNorm = true
+        params.spatSubtrNormType = 'gauss'
+        params.spatSubtrNormWidth = 7
+        
+        params.doSpatDivNorm = false    
+
+        return params
+    
+    end
     
 
 end

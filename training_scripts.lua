@@ -55,26 +55,31 @@ end
 
 
 
-fixConvNetParams = function(networkOpts)
+fixConvNetParams = function(networkOpts, defaultNetworkName)
+     
+     
+    local validPoolTypes = {1, 2, 'MAX'}
+    local validSpatialNormTypes = {'none', 'gauss'}
      
     if (#networkOpts > 1) or networkOpts[1] then
         for j = 1,#networkOpts do
-            networkOpts[j] = fixConvNetParams(networkOpts[j])
+            networkOpts[j] = fixConvNetParams(networkOpts[j], defaultNetworkName)
         end
         return networkOpts
     end
             
      
-    local defaultParams = getDefaultConvNetParams()
-    
+    local defaultParams = getDefaultConvNetParams(networkOpts.defaultNet)
+    --print(defaultNetworkName, defaultParams)
     local allowPoolStrideGreaterThanPoolSize = false
     --NetworkOpts = networkOpts
     
     local nStates, nStatesConv, nStatesFC
     local nConvLayers, nFCLayers
     if not networkOpts.nStatesConv then
+        -- e.g input nStates = {6, 16, -120} ==> nStatesConv = {6, 16}, nStatesFC = {120}
 
-        nStates = networkOpts.nStates
+        nStates = networkOpts.nStates  
         networkOpts.nStatesConv = {}
         networkOpts.nStatesFC = {}
         for i,v in ipairs(nStates) do
@@ -109,7 +114,7 @@ fixConvNetParams = function(networkOpts)
     end
         
     
-    local makeSureFieldIsCorrectLength = function(fieldName)
+    local makeSureFieldIsCorrectLength = function(fieldName, validValues)
         -- make sure is in table format (if was a number)
         --NetworkOpts = networkOpts
         --FieldName = fieldName
@@ -121,7 +126,7 @@ fixConvNetParams = function(networkOpts)
                 
         -- handle case where length is shorter than number of convolutional layers (repeat)
         local nInField = #(networkOpts[fieldName])
-    
+       
         if nInField < nConvLayers  then
             if nInField > 1 then
                 error(string.format('%s: nConv = %d, nInField = %d', fieldName, nConvLayers, nInField));
@@ -129,6 +134,7 @@ fixConvNetParams = function(networkOpts)
             assert(nInField == 1)
             networkOpts[fieldName] = table.rep(networkOpts[fieldName], nConvLayers, 1)
         end
+        
     
         -- handle case where length is longer than number of convolutional layers (truncate)
         if nInField > nConvLayers then
@@ -143,7 +149,31 @@ fixConvNetParams = function(networkOpts)
                 networkOpts[fieldName][i] = string.upper(networkOpts[fieldName][i])
             end
         end
-
+        
+        
+        if validValues then
+            if not type(validValues) == 'table' then
+                validValues = {validValues}
+            end
+                
+            for i = 1,nConvLayers do
+                local value_ok = false
+                for j = 1,#validValues do
+                    if isequal(string.lower(networkOpts[fieldName][i]), string.lower( validValues[j]) ) then
+                        value_ok = true;
+                    end
+                end
+                if not (value_ok) then
+                    
+                    error(string.format('Unknown %s type : %s\n  (did not match any of these: %s)', fieldName, networkOpts[fieldName][i],                      table.concat(validValues, ', ')) );
+                end
+                
+            end
+                
+            
+        end   
+            
+ 
         
     end
     
@@ -161,14 +191,16 @@ fixConvNetParams = function(networkOpts)
     end
     
 
-    -- (2) pooling
-    local skipAllPooling = not networkOpts.doPooling 
+    -- (2) pooling  
     
-        
+    -- (2a) check if master flag is set to 0
+    local skipAllPooling = (networkOpts.doPooling == false)     -- master value that overrides all other pooling values if set equal to false
+    
+    -- (2b) make sure all pooling parameters are the right length.    
     if skipAllPooling then
-        networkOpts.poolSizes = table.rep(0, nConvLayers)
+        networkOpts.poolSizes   = table.rep(0, nConvLayers)
         networkOpts.poolStrides = table.rep(0, nConvLayers)
-        networkOpts.poolTypes = table.rep(0, nConvLayers)
+        networkOpts.poolTypes   = table.rep(0, nConvLayers)
         
     else
         
@@ -183,9 +215,9 @@ fixConvNetParams = function(networkOpts)
         makeSureFieldIsCorrectLength('poolStrides')
         
         --- (3) poolTypes        
-        makeSureFieldIsCorrectLength('poolTypes')        
+        makeSureFieldIsCorrectLength('poolTypes', validPoolTypes)        
         
-        -- if any layer has no pooling (poolSize == 0), set the stride & type to 0
+        -- if any layer has no pooling (poolSize == 0 or 1), set the stride & type to 0
         for i = 1, nConvLayers do  
             if (networkOpts.poolSizes[i] == 0) or (networkOpts.poolSizes[i] == 1) then
                 networkOpts.poolStrides[i] = 0
@@ -199,72 +231,79 @@ fixConvNetParams = function(networkOpts)
         
     end    
     
+    -- (2c) if no pooling at all, set the master flag to 0, and set all other parameters accordingly
     local poolingInAnyLayers = false
     for i = 1,nConvLayers do
         if (networkOpts.poolSizes[i] > 0) then
             poolingInAnyLayers = true
         end
     end
+    networkOpts.doPooling = poolingInAnyLayers
     
     if not poolingInAnyLayers then
         networkOpts.poolSizes = table.rep(0, nConvLayers)
         networkOpts.poolStrides = table.rep(0, nConvLayers)
         networkOpts.poolTypes = table.rep(0, nConvLayers)
     end
-    networkOpts.doPooling = poolingInAnyLayers
+    
 
  
+    -- SUBTRACTIVE Normalization and    DIVISIVE Normalization
 
-    -- SUBTRACTIVE Normalization
-    local doSpatSubtrNorm = (networkOpts.doSpatSubtrNorm ~= false) and 
-        networkOpts.spatSubtrNormType and networkOpts.spatSubtrNormType ~= 'none' and
-        networkOpts.spatSubtrNormWidth and networkOpts.spatSubtrNormWidth > 0
+    local allSpatialNormTypes = {'Subtr', 'Div'}
+    for normt_i, normType in ipairs(allSpatialNormTypes) do
+        
+        local masterNormFlagField = 'doSpat' .. normType .. 'Norm'
+        local normTypeField   = 'spat' .. normType .. 'NormType'
+        local normWidthField  = 'spat' .. normType .. 'NormWidth'
+        
     
-    if networkOpts.doSpatSubtrNorm then
-        networkOpts.doSpatSubtrNorm = true
-    else
-        networkOpts.doSpatSubtrNorm = false
-        networkOpts.spatSubtrNormType = 'none'
-        networkOpts.spatSubtrNormWidth = 0        
-    end
-    makeSureFieldIsCorrectLength('spatSubtrNormType')
-    makeSureFieldIsCorrectLength('spatSubtrNormWidth')
+        -- (3a) check if master flag is set to 0
+        local skipAllNorm = (networkOpts[masterNormFlagField] == false) 
+            or (networkOpts[normTypeField] == nil) or (networkOpts[normWidthField] == nil)
         
         
-        
-    -- DIVISIVE Normalization
-    local doSpatDivNorm = (networkOpts.doSpatDivNorm ~= false) and 
-        networkOpts.spatDivNormType and networkOpts.spatDivNormType ~= 'none' and
-        networkOpts.spatDivNormWidth and networkOpts.spatDivNormWidth > 0
-    
-    if networkOpts.doSpatDivNorm then
-        networkOpts.doSpatDivNorm = true
-    else
-        networkOpts.doSpatDivNorm = false
-        networkOpts.spatDivNormType = 'none'
-        networkOpts.spatDivNormWidth = 0        
-    end
-    makeSureFieldIsCorrectLength('spatDivNormType')
-    makeSureFieldIsCorrectLength('spatDivNormWidth')
-    
-   
-    for i = 1,nConvLayers do
-        if not table.any(strcmpi(networkOpts.spatSubtrNormType[i], {'none', 'gauss'})) then
-            error(string.format('Unknown divisive normalization type : %s', networkOpts.spatSubtrNormType[i]))
+        --print(normType, skipAllNorm)
+        -- (3b) check if master flag is set to 0
+        if skipAllNorm then
+            networkOpts[normTypeField]   = table.rep('none', nConvLayers)
+            networkOpts[normWidthField]  = table.rep(0,      nConvLayers)
+            
+        else
+            makeSureFieldIsCorrectLength(normTypeField,  validSpatialNormTypes)
+            makeSureFieldIsCorrectLength(normWidthField)
         end
-        if not table.any(strcmpi(networkOpts.spatDivNormType[i], {'none', 'gauss'})) then
-            error(string.format('Unknown divisive normalization type : %s', networkOpts.spatDivNormType[i]))
+        
+        
+        -- (3c) if no normalization at all, set the master flag to 0, and set all other parameters accordingly
+        local normInAnyLayers = false
+        for i = 1,nConvLayers do
+            if (networkOpts[normWidthField][i] > 0) then
+                normInAnyLayers = true
+            end
         end
+        networkOpts[masterNormFlagField] = normInAnyLayers  and not skipAllNorm
+        
+        if not normInAnyLayers then
+            networkOpts[normTypeField]   = table.rep('none', nConvLayers)
+            networkOpts[normWidthField]  = table.rep(0,      nConvLayers)
+        end
+        
+        
     end    
-       
+    
+    
     return networkOpts
     
     
 end
 
+
+
+
 getConvNetStr = function(networkOpts, niceOutputFields)
     
-    local defaultParams = getDefaultConvNetParams()
+    local defaultParams = getDefaultConvNetParams(networkOpts.defaultNet)
     
     local defaultPoolStrideIsAuto = true
     
@@ -281,7 +320,10 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     --]]    
     --print('----Before-------\n')
     --print(networkOpts)
+    
     networkOpts = fixConvNetParams(networkOpts)
+    defaultParams = fixConvNetParams(defaultParams)
+    
     --print('----After-------\n\n\n')
     --print(networkOpts)
     
@@ -297,7 +339,7 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     elseif convFunction == 'SpatialConvolution' then 
         convFcn_str = 'f'  -- F = 'fully connected'
     elseif convFunction == 'SpatialConvolutionCUDA' then 
-        convFcn_str = 'c'  -- F = 'fully connected'
+        convFcn_str = 'c'  -- c = 'CUDA'
     else
         error(string.format('Unknown spatial convolution function : %s', tostring(convFunction)) )
     end
@@ -317,7 +359,7 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     if not isequal_upTo(networkOpts.filtSizes, defaultParams.filtSizes, nConvLayers) then        
         if isequal_upTo(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
             filtSizes_str = '_nofilt'
-        elseif length(table.nUnique(networkOpts.filtSizes) == 1 then
+        elseif table.nUnique(networkOpts.filtSizes) == 1 then
             filtSizes_str = '_fs' .. networkOpts.filtSizes[1]
         else
             filtSizes_str = '_fs' .. abbrevList(networkOpts.filtSizes)
@@ -333,7 +375,7 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         if not isequal_upTo(networkProp, defaultProp, nConvLayers) then        
             if isequal_upTo(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
                 property_str = '_' .. str_NA
-            elseif length(table.nUnique(networkOpts.filtSizes) == 1 then
+            elseif table.nUnique(networkOpts.filtSizes) == 1 then
                 property_str = '_' .. fldAbbrev .. networkProp[1]
             else
                 property_str = '_' .. fldAbbrev .. abbrevList(networkProp)
@@ -406,6 +448,7 @@ getConvNetStr = function(networkOpts, niceOutputFields)
                 
         -- 2b. Pool Size(s)
         if not isequal(networkOpts.poolSizes, defaultParams.poolSizes, nConvLayers) then
+            print('net', networkOpts.poolSizes, 'default', defaultParams.poolSizes)
             poolSizes_str = '_psz' .. toTruncList(networkOpts.poolSizes, nConvLayers)
         end
         if niceOutputFields == 'all' or table.contains(niceOutputFields, 'poolSizes') then
@@ -613,3 +656,39 @@ networkLayerStrAbbrev = function(layerStrFull)
 end
 
     
+
+
+--[[
+
+    local doSpatSubtrNorm = (networkOpts.doSpatSubtrNorm ~= false) and 
+        networkOpts.spatSubtrNormType and networkOpts.spatSubtrNormType ~= 'none' and
+        networkOpts.spatSubtrNormWidth and networkOpts.spatSubtrNormWidth > 0
+    
+    if networkOpts.doSpatSubtrNorm then
+        networkOpts.doSpatSubtrNorm = true
+    else
+        networkOpts.doSpatSubtrNorm = false
+        networkOpts.spatSubtrNormType = 'none'
+        networkOpts.spatSubtrNormWidth = 0        
+    end
+    makeSureFieldIsCorrectLength('spatSubtrNormType')
+    makeSureFieldIsCorrectLength('spatSubtrNormWidth')
+        
+        
+        
+    local doSpatDivNorm = (networkOpts.doSpatDivNorm ~= false) and 
+        networkOpts.spatDivNormType and networkOpts.spatDivNormType ~= 'none' and
+        networkOpts.spatDivNormWidth and networkOpts.spatDivNormWidth > 0
+    
+    if networkOpts.doSpatDivNorm then
+        networkOpts.doSpatDivNorm = true
+    else
+        networkOpts.doSpatDivNorm = false
+        networkOpts.spatDivNormType = 'none'
+        networkOpts.spatDivNormWidth = 0        
+    end
+    makeSureFieldIsCorrectLength('spatDivNormType')
+    makeSureFieldIsCorrectLength('spatDivNormWidth')
+    
+    
+    --]]
