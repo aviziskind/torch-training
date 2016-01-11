@@ -235,8 +235,10 @@ getDataStats = function(data)
     end
     
     stats.nInputs = stats.width * stats.height * stats.nInputPlanes
-    
+    St = stats
     local Y = data.outputMatrix
+    YY = Y
+    
     if not Y then
         --stats.nOutputs = 0
     else

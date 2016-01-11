@@ -46,17 +46,7 @@ getMLPstr = function(networkOpts)
     
     local gpu_str = getTrainOnGPUStr(networkOpts)
     
-    local nLinType_str = ''
-    if networkOpts.nLinType then
-       if string.lower(networkOpts.nLinType) == 'relu' then
-           nLinType_str = 'rl'
-       elseif string.lower(networkOpts.nLinType) == 'tanh' then
-           --nLinType_str = 'th'
-       else
-            error(string.format('Unknown nonlinearity type : %s', networkOpts.nLinType));
-       end
-    end
-        
+    local nLinType_str =  getNonlinearityStr(networkOpts)
     
     mlpStr      = nUnits_str  .. nLinType_str .. gpu_str
     
@@ -66,6 +56,21 @@ getMLPstr = function(networkOpts)
 end
 
 
+getNonlinearityStr = function(networkOpts)
+    
+    local nLinType_str = ''
+    if networkOpts.nLinType then
+       if string.lower(networkOpts.nLinType) == 'relu' then
+           nLinType_str = '_rl'
+       elseif string.lower(networkOpts.nLinType) == 'tanh' then
+           --nLinType_str = 'th'
+       else
+            error(string.format('Unknown nonlinearity type : %s', networkOpts.nLinType));
+       end
+    end
+
+    return nLinType_str
+end
 
 fixConvNetParams = function(networkOpts)
      
@@ -649,11 +654,12 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         
     end
     
+    local nLinType_str =  getNonlinearityStr(networkOpts)
     
     local gpu_str = getTrainOnGPUStr(networkOpts)
     
     local convNet_str      = convFcn_str .. nStates_str      .. filtSizes_str      .. doPooling_str      .. poolSizes_str      .. poolTypes_str      .. poolStrides_str .. gpu_str
-    local convNet_str_nice = convFcn_str .. nStates_str_nice .. filtSizes_str_nice .. doPooling_str_nice .. poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  .. gpu_str
+    local convNet_str_nice = convFcn_str .. nStates_str_nice .. filtSizes_str_nice .. doPooling_str_nice .. poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  ..  nLinType_str ..gpu_str
     return convNet_str, convNet_str_nice
     
 end
@@ -662,7 +668,7 @@ end
 
 getTrainOnGPUStr = function(networkOpts)
     local gpu_str = ''
-    local useCUDAmodules = networkOpts.convFunction and string.find(networkOpts.convFunction, 'CUDA')
+    --local useCUDAmodules = networkOpts.convFunction and string.find(networkOpts.convFunction, 'CUDA')
     if networkOpts.trainOnGPU  then
         gpu_str = '_GPU'
         if (networkOpts.gpuBatchSize > 1) then

@@ -11,9 +11,13 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local redoTrainingIfOld_date = 1402977793 -- (6/15, late) --  1402928294 --(6/15)      --1393876070 -- os.time()
     local forceContinueTraining = true
     local forceContinueTrainingIfBefore = 1417727482 -- (12/4)   1401632026 -- =(6/1) --  1399960186 -- 1399958480 --1393878677  -- os.time()
-    local shuffleTrainingSamples = true -- since we're mixing sets with different noise levels, want to be evenly spread out
-    local shuffleTrainingSamplesEachEpoch = true
+    local shuffleTrainingSamples = false -- since we're mixing sets with different noise levels, want to be evenly spread out
+    local shuffleTrainingSamplesEachEpoch = false
     
+    
+    if not shuffleTrainingSamples then
+        print(' Warning - shuffling training samples is turned OFF !! ');
+    end
     local trainingAlgorithm = 'SGD'
     --local trainingAlgorithm = 'L-BFGS'
     
@@ -37,6 +41,12 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local criterion = model_struct.criterion
     local trainingClassifier = torch.isClassifierCriterion(torch.typename(criterion))
     trainingOpts.trainingClassifier = trainingClassifier
+    
+    --local haveExtraCriterion = model_struct.criterion2
+    local origCriterion = model_struct.criterion
+    local extraCriterion = model_struct.extraCriterion
+    print('origCriterion', origCriterion)
+    print('extraCriterion', extraCriterion)
     
     local require_cost_minimum = false
     if not trainingClassifier then
@@ -72,7 +82,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     end 
         
     --local trainingOpts_default = {MIN_EPOCHS = 1000, MAX_EPOCHS = 2000, EXTRA_EPOCHS = 0, 
-    local trainingOpts_default = {MIN_EPOCHS = 10, MAX_EPOCHS = 100, EXTRA_EPOCHS = 0, 
+    local trainingOpts_default = {MIN_EPOCHS = 2, MAX_EPOCHS = 50, EXTRA_EPOCHS = 0, 
         SWITCH_TO_LBFGS_AT_END = false, SAVE_TRAINING = true, 
         TEST_ERR_NEPOCHS_STOP_AFTER_MIN = 10, REQUIRE_COST_MINIMUM = require_cost_minimum} 
     
@@ -186,7 +196,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         nEpochsDone      = trainingLogger.nEpochs
         model_struct     = trainingLogger.model_struct
                 
-        prev_train_loss        = trainingLogger:currentLoss()
+        prev_train_loss   = trainingLogger:currentLoss()
         prev_trainErr_pct = trainingLogger:currentTrainErr()
         prev_testErr_pct = trainingLogger:currentTestErr()
         
@@ -402,7 +412,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         nInputFeats = feat_extr_nOutputs
     end
 
-
+    count = 0;
     ignoreGradient = false
     
     local checkForNan = false
@@ -446,6 +456,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 input = trainInputs[trainingIdxs[_idx_]]    
                 if freezeFeatures and not usePreExtractedFeatures then   -- extract features now to pass the the (trainable) classifier
                     input = feat_extractor:forward(input)
+                    count = count + 1
                 end
                 target = trainingOutputs[trainingIdxs[_idx_]]  
                     
@@ -463,9 +474,12 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 if output:dim() > 1 then
                     output = output:resize(nOutputs)
                 end
-                
-                loss = loss + criterion:forward(output, target)
-                                
+                local extraLoss = criterion:forward(output, target)
+                --if _idx_ < 10 then
+                  --  io.write(string.format('%d : output : %s \n       target: %s\n.             extraLoss: %.4f\n\n', 
+                    --            _idx_, tostring_inline(output, '%.3f'), tostring_inline(target, '%.3f'), extraLoss))
+                -- end
+                loss = loss + extraLoss
                 model_toTrain:backward(input, criterion:backward(output, target))
                 
                 if trainingClassifier then
@@ -592,6 +606,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             loss = loss + fs[1]
         end
         
+        --print(count)
                     --print(trainingLogger.sgd_config)
 
                 if debug then
@@ -614,6 +629,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 
     local current_train_loss, prev_train_loss, train_loss_change_pct = 0,0,0
     local current_test_loss, prev_test_loss, test_loss_change_pct = 0,0,0
+    local current_train_loss_extraCrit, current_test_loss_extraCrit = 0,0
     local curr_trainErr_pct, prev_trainErr_pct, trainErr_pct_change_pct = 100, 100, 100
     local fs, curr_testErr_pct, prev_testErr_pct, testErr_pct_change_pct = 100, 100, 100
 
@@ -737,6 +753,21 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 curr_testErr_pct = 0
             end
         
+        if extraCriterion then
+            model_struct_forTest.criterion = extraCriterion
+            
+            _, _, current_train_loss_extraCrit = testModel(model_struct_forTest, trainData_use, 
+                {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize})        
+
+            _, _, current_test_loss_extraCrit =  testModel(model_struct_forTest, testData_use, 
+                {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize})        
+                
+            model_struct_forTest.criterion = origCriterion
+            
+        end
+        
+        
+        
         train_loss_change_pct = (current_train_loss - prev_train_loss)/prev_train_loss * 100
         prev_train_loss = current_train_loss;
 
@@ -762,10 +793,12 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             --local curr_trainErr_pct_after2 = testModel(model_toTrain, trainData_use)
             --assert(curr_trainErr_pct_after == curr_trainErr_pct_after2)
             local curr_testErr_pct_after, _, current_test_loss_after = testModel(model_struct_forTest, testData_use, {batchSize = batchSize})        
-            
             io.write(string.format('   Quick check: TrainLoss = %.4f. TestLoss = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
                         current_train_loss_after, current_test_loss_after, curr_trainErr_pct_after, curr_testErr_pct_after))
+                
+                
         end
+        
 
         
         if trainingOpts.SAVE_TRAINING then
@@ -776,10 +809,16 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             io.write(string.format('done:%s]', sec2hms(t_elapsed)))
             
             logger:add{['Epoch'] = nEpochsDone}        
-            logger:add{['Cost'] = current_train_loss}
+            logger:add{['Train Cost'] = current_train_loss}
+            logger:add{['Test  Cost'] = current_test_loss}
             logger:add{['Train Err'] = curr_trainErr_pct}
             logger:add{['Test Err'] = curr_testErr_pct}
             logger:add{['Time'] = timeForThisEpoch}
+            if extraCriterion then
+                logger:add{['Train Cost 2'] = current_train_loss_extraCrit}
+                logger:add{['Test  Cost 2'] = current_test_loss_extraCrit}
+            end
+            
             logger:println()
             
             if debug then
@@ -796,6 +835,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 nEpochsDone, current_train_loss, train_loss_change_pct, current_test_loss, test_loss_change_pct, 
                     curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, sec2hms(timeForThisEpoch_tot)))
 
+        if extraCriterion then
+            io.write(string.format('    [Extra Criterion: Train: %.4f. Test : %.4f]\n', current_train_loss_extraCrit, current_test_loss_extraCrit))
+        end
 
         --error('!')
         --torch.save(networks_dir..'network_'.. epoch .. '.bin', model)

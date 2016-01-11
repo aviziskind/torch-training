@@ -1,12 +1,12 @@
+require 'torch'   -- torch
+require 'nn'      -- provides all sorts of loss functions
+
+--dofile 'mycri.lua'
+--dofile 'mycri_kai.lua'
 
 
 getLossFunction = function(loss_function_name, model)
 
-  require 'torch'   -- torch
-  require 'nn'      -- provides all sorts of loss functions
-
-  require 'mycri'
-  require 'mycri_kai'
   
   local criterion
 
@@ -37,10 +37,10 @@ getLossFunction = function(loss_function_name, model)
      criterion.sizeAverage = false
      
   elseif loss_function_name == 'mycri' then
-      model:add(nn.Tanh())
+      --model:add(nn.Tanh())
       
       criterion = nn.mycri()
-      criterion.sizeAverage = false
+      
   elseif loss_function_name == 'mycri_kai' then
 
       --model:add(nn.Tanh())
