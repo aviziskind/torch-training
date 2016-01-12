@@ -11,8 +11,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local redoTrainingIfOld_date = 1402977793 -- (6/15, late) --  1402928294 --(6/15)      --1393876070 -- os.time()
     local forceContinueTraining = true
     local forceContinueTrainingIfBefore = 1417727482 -- (12/4)   1401632026 -- =(6/1) --  1399960186 -- 1399958480 --1393878677  -- os.time()
-    local shuffleTrainingSamples = false -- since we're mixing sets with different noise levels, want to be evenly spread out
-    local shuffleTrainingSamplesEachEpoch = false
+    local shuffleTrainingSamples = true -- since we're mixing sets with different noise levels, want to be evenly spread out
+    local shuffleTrainingSamplesEachEpoch = true
     
     
     if not shuffleTrainingSamples then
@@ -831,7 +831,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         model_struct.trainingDate = os.time()
 
         local timeForThisEpoch_tot = os.time() - startTime
-        io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n\n', 
+        io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n', 
                 nEpochsDone, current_train_loss, train_loss_change_pct, current_test_loss, test_loss_change_pct, 
                     curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, sec2hms(timeForThisEpoch_tot)))
 
@@ -839,6 +839,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             io.write(string.format('    [Extra Criterion: Train: %.4f. Test : %.4f]\n', current_train_loss_extraCrit, current_test_loss_extraCrit))
         end
 
+        io.write('\n')
         --error('!')
         --torch.save(networks_dir..'network_'.. epoch .. '.bin', model)
         do
