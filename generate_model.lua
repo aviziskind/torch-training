@@ -1213,11 +1213,18 @@ convertNetworkToMatlabFormat = function(model)
 
         for mod_j, module_i in ipairs(modules) do
 
+            Module_i = module_i
             local module_full_str = tostring(module_i)
             --print(module_full_str )
             assert(string.sub(module_full_str, 1, 3) == 'nn.')
 
-            local module_str = string.sub(module_full_str, 4, #module_full_str)
+            local module_str = string.sub(module_full_str, 4, #module_full_str) -- remove 'nn.' prefix.
+            
+            local idx_bracket = string.find(module_str, '[(]') -- remove parenthetical descriptors ( e.g. SpatialConvolution(1 -> 16, 5x5)  )
+            if idx_bracket then
+                module_str = string.sub(module_str, 1, idx_bracket-1)
+            end
+            
 
             local j = net.nModules
 
@@ -1230,82 +1237,134 @@ convertNetworkToMatlabFormat = function(model)
                 net[ 'm' .. j .. '_str'] = str2vec(module_str)
                 local module_name_str = module_str
 
-                if string.sub(module_str, 1, 18) == 'SpatialConvolution' then
-                --if module_str == 'SpatialConvolutionMap' or module_str == 'SpatialConvolution' or  module_str == 'SpatialConvolutionCUDA'  then
-
-                    net[ 'm' .. j .. '_bias'] = module_i.bias:double()
-                    net[ 'm' .. j .. '_weight'] = module_i.weight:double()
-                    net[ 'm' .. j .. '_nInputPlane'] = torch.DoubleTensor({module_i.nInputPlane})
-                    net[ 'm' .. j .. '_nOutputPlane'] = torch.DoubleTensor({module_i.nOutputPlane})
-                    net[ 'm' .. j .. '_kH'] = torch.DoubleTensor({module_i.kH})
-                    net[ 'm' .. j .. '_kW'] = torch.DoubleTensor({module_i.kW})
-                    net[ 'm' .. j .. '_dH'] = torch.DoubleTensor({module_i.dH})
-                    net[ 'm' .. j .. '_dW'] = torch.DoubleTensor({module_i.dW})
-                    if module_i.connTable then
-                        net[ 'm' .. j .. '_connTable'] = module_i.connTable:double()
-                    end
-
+                local requiredFieldNames = {}
+                local optionalFieldNames = {}
+                if module_str == 'SpatialConvolution' or  module_str == 'SpatialConvolutionCUDA'  then
+                    
+                    requiredFieldNames = {'bias', 'weight', 'nInputPlane', 'nOutputPlane', 'kH', 'kW', 'dH', 'dW'}
+                    optionalFieldNames = {'padH', 'padW'}
                     module_name_str = 'Conv'
-
-                elseif (module_str == 'SpatialSubSampling') then                    
-                    net[ 'm' .. j .. '_kH'] = torch.DoubleTensor({module_i.kH})
-                    net[ 'm' .. j .. '_kW'] = torch.DoubleTensor({module_i.kW})
-                    net[ 'm' .. j .. '_dH'] = torch.DoubleTensor({module_i.dH}) 
-                    net[ 'm' .. j .. '_dW'] = torch.DoubleTensor({module_i.dW})
-                    net[ 'm' .. j .. '_connTable'] = module_i.connTable
-
+                    
+                elseif module_str == 'SpatialConvolutionMap' then
+                    
+                    requiredFieldNames = {'bias', 'weight', 'nInputPlane', 'nOutputPlane', 'kH', 'kW', 'dH', 'dW', 'connTable'}  -- connTable optional?
+                    module_name_str = 'Conv'
+                    
+                elseif module_str == 'SpatialSubSampling' then        
+                
+                    requiredFieldNames = {'kH', 'kW', 'dH', 'dW', 'connTable'}
                     module_name_str = 'SubSamp'
 
-                elseif string.sub(module_str, 1, 18) == 'SpatialZeroPadding' then
-                    net[ 'm' .. j .. '_pad_l'] = torch.DoubleTensor({module_i.pad_l})
-                    net[ 'm' .. j .. '_pad_r'] = torch.DoubleTensor({module_i.pad_r})
-                    net[ 'm' .. j .. '_pad_t'] = torch.DoubleTensor({module_i.pad_t})
-                    net[ 'm' .. j .. '_pad_b'] = torch.DoubleTensor({module_i.pad_b})
-
+                elseif module_str == 'SpatialAveragePooling' then   
+                
+                    requiredFieldNames = {'kH', 'kW', 'dH', 'dW', 'divide'}    
+                    module_name_str = 'SubSamp'                
+                
+                elseif module_str == 'MulConstant' then   
+                
+                    requiredFieldNames = {'inplace', 'constant_scalar'}    
+                    module_name_str = 'MulConst'     
+                
+                elseif module_str == 'SpatialZeroPadding' then                
+                    
+                    requiredFieldNames = {'pad_l', 'pad_r', 'pad_t', 'pad_b'}
                     module_name_str = 'ZeroPad'
 
-
                 --elseif (module_str == 'SpatialMaxPooling') or (module_str == 'SpatialMaxPoolingCUDA') then                    
-                elseif string.sub(module_str, 1, 17) == 'SpatialMaxPooling' then
-                    net[ 'm' .. j .. '_kH'] = torch.DoubleTensor({module_i.kH})
-                    net[ 'm' .. j .. '_kW'] = torch.DoubleTensor({module_i.kW})
-                    net[ 'm' .. j .. '_dH'] = torch.DoubleTensor({module_i.dH})
-                    net[ 'm' .. j .. '_dW'] = torch.DoubleTensor({module_i.dW})
-                    if module_i.indices then
-                        net[ 'm' .. j .. '_indices'] = module_i.indices:double()
-                    end
-
+                elseif module_str == 'SpatialMaxPooling' then
+                
+                    requiredFieldNames = {'kH', 'kW', 'dH', 'dW', 'indices'}   -- indices optional?
+                    optionalFieldNames = {'padH', 'padW', 'ceil_mode'}
                     module_name_str = 'MaxPool'
                 
-                elseif string.sub(module_str, 1, 7) == 'Reshape' then
-                    net[ 'm' .. j .. '_nelement'] = torch.DoubleTensor({module_i.nelement})
-
+                elseif module_str == 'Reshape' then
+                
+                    requiredFieldNames = {'nelement', 'vector', 'size', 'batchsize'}
                     module_name_str = 'Reshape'
-                elseif string.sub(module_str, 1, 6) == 'Linear' then
+                
+                elseif module_str == 'Linear' then
 
-                    net[ 'm' .. j .. '_bias'] = module_i.bias:double()
-                    net[ 'm' .. j .. '_weight'] = module_i.weight:double()
-
+                    requiredFieldNames = {'bias', 'weight'}
+                    optionalFieldNames = {'addBuffer'}
                     module_name_str = 'Linear'
+                
                 elseif module_str == 'Transpose' then
+                    requiredFieldNames = {'permutations'}
 
-                    --net[ 'm' .. j .. '_permutations'] = tbltbl2Tensor ( module_i.permutations ):double()
-                    net[ 'm' .. j .. '_permutations'] = table.toTensor ( module_i.permutations ):double()
+                elseif (module_str == 'Sqrt') then
+                    requiredFieldNames = {'eps'}
 
                 elseif (module_str == 'Square') or (module_str == 'Sqrt') or (module_str == 'Copy') or 
                     (module_str == 'Tanh') or (module_str == 'LogSoftMax') or (module_str == 'Exp')  then     
 
-                else
-                
-                
-                
+                else                
                     error('Unhandled case : module type = ' .. module_str)
 
                 end
 
+            
+                -- check that didn't leave any fields out:
+                local allfieldnames_have = table.fieldnames(module_i)
+                H = allfieldnames_have
+                local fieldNames_copied = table.merge(requiredFieldNames, optionalFieldNames)
+                allfieldnames_have = table.setdiff(allfieldnames_have, {'_input', 'gradInput', 'finput', 'fgradInput', 
+                        'output', '_gradOutput', 'gradBias','gradWeight' })
+                
+                local extraFields_lookedFor = table.setdiff(requiredFieldNames, allfieldnames_have)
+                local missingFields_notCopied = table.setdiff(allfieldnames_have, table.merge(requiredFieldNames, optionalFieldNames))
+                
+                if #extraFields_lookedFor > 0 then
+                    print('Module ', mod_j, module_full_str, 'These fields were looked for, but not not present : ', extraFields)
+                    error('Some fields were not present')
+                end
+                
+                if #missingFields_notCopied > 0 then
+                    print('Module ', mod_j, module_full_str, 'These fields were left out : ', missingFields_notCopied)
+                    error('Some fields were left out')
+                end
+                
                 net.modules_str = net.modules_str .. module_name_str .. ';' 
                 net.nModules = net.nModules + 1
 
+
+            
+                for j = 1,2 do
+                    local fldNames, required
+                    if j == 1 then
+                        fldNames = requiredFieldNames
+                        required = true
+                    elseif j == 2 then
+                        fldNames = optionalFieldNames
+                        required = false
+                    end
+
+                    for i,fieldName in ipairs(fldNames) do
+                        local fieldVal = module_i[fieldName]
+                        local globFieldName = 'm' .. j .. '_' .. fieldName
+                        
+                        if fieldVal == nil then
+                            if required then 
+                                error(string.format('Module %s does not have field %s', module_str, fieldName))
+                            end
+                        elseif torch.isTensor(fieldVal) then
+                            net[globFieldName] = module_i[fieldName]:double()
+                        elseif type(fieldVal) == 'number' then
+                            net[globFieldName] = torch.DoubleTensor(fieldVal)
+                        elseif torch.isStorage(fieldVal) then
+                            local double_storage = torch.DoubleStorage(fieldVal:size()):copy(fieldVal)
+                            net[globFieldName] = torch.DoubleTensor(double_storage)
+                        elseif type(fieldVal) == 'boolean' then
+                            local num = iff(fieldVal, 1, 0)
+                            net[globFieldName] = torch.DoubleTensor(num)
+                        else
+                            error(string.format('Unhandled type : %s is a %s [%s]', fieldName, type(fieldVal), tostring(fieldVal)))
+                        end
+                    
+                    end
+                end
+                
+                
+              
             end
         end    
 

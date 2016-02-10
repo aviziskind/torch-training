@@ -45,9 +45,11 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     --local haveExtraCriterion = model_struct.criterion2
     local origCriterion = model_struct.criterion
     local extraCriterion = model_struct.extraCriterion
-    print('origCriterion', origCriterion)
-    print('extraCriterion', extraCriterion)
-    
+    if extraCriterion then
+        print('origCriterion', origCriterion)
+        print('extraCriterion', extraCriterion)
+    end
+
     local require_cost_minimum = false
     if not trainingClassifier then
         require_cost_minimum = true
