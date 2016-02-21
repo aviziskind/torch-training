@@ -114,6 +114,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
            
 
         local zeroPadForPooling = n.zeroPadForPooling or true
+        local zeroPadForConvolutions = n.zeroPadForConvolutions or false
         local splitInTwo = function(x)
             local a = math.ceil(x/2)
             local b = x-a 
@@ -148,11 +149,24 @@ generateModel = function(inputStats, networkOpts, letterOpts)
             -- 1. Convolutional layer
             local SpatConvModule
             local kW, kH = filtSizes[layer_i], filtSizes[layer_i]
+            local dW, dH = 1, 1
             if (filtSizes[layer_i] > 0) then 
+
+                local nConvPaddingW, nConvPaddingH = 0,0
+                if zeroPadForConvolutions then
+                    if type(zeroPadForConvolutions) == 'number' then
+                        nConvPaddingW = zeroPadForConvolutions
+                        nConvPaddingH = nConvPaddingW
+                    elseif type(zeroPadForConvolutions) == 'boolean' and zeroPadForConvolutions == true then
+                        nConvPaddingW = math.floor( (kW-1)/2 )
+                        nConvPaddingH = math.floor( (kH-1)/2 )
+                    end
+                end
 
                 if convFunction == 'SpatialConvolutionMap' then
                     -- fanin: how many incoming connections (from a state) in previous layer each output unit receives input from.
                     -- this cant be more than the number of states in previous layer!
+                    assert(dW == 1 and dH == 1)
                     Fanin = fanin
                     NStatesConv = nStatesConv
                     Layer_i = layer_i
@@ -160,24 +174,31 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     connectTables[layer_i] = nn.tables.random(nStatesConv[layer_i-1], nStatesConv[layer_i], fanin_use) -- OK b/c only 1 feature--- 
                     SpatConvModule = nn.SpatialConvolutionMap(connectTables[layer_i], kW, kH)
 
-                elseif convFunction == 'SpatialConvolution' then
-                    SpatConvModule = nn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)
+                    if nConvPaddingW > 0 or nConvPaddingH > 0 then
+                        local convPaddingModule = nn.SpatialZeroPadding(nConvPaddingW, nConvPaddingW, nConvPaddingH, nConvPaddingH)
+                        feat_extractor:add(convPaddingModule)
+                    end
 
-                elseif convFunction == 'SpatialConvolutionCUDA' then
-                    SpatConvModule = nn.SpatialConvolutionCUDA(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)
+                elseif convFunction == 'SpatialConvolution' then
+                    SpatConvModule = nn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH,  dW, dH,  nConvPaddingW, nConvPaddingH)
+
+                --elseif convFunction == 'SpatialConvolutionCUDA' then   (deprecated)
+                  --  SpatConvModule = nn.SpatialConvolutionCUDA(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)
 
                 elseif convFunction == 'SpatialConvolutionMM' then
-                    SpatConvModule = nn.SpatialConvolutionMM(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)                                        
+                    SpatConvModule = nn.SpatialConvolutionMM(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH, dW, dH,  nConvPaddingW, nConvPaddingH)
+                
                 elseif convFunction == 'SpatialConvolutionCUDNN' then
-                    SpatConvModule = cudnn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)
+                    SpatConvModule = cudnn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH,  dW, dH,  nConvPaddingW, nConvPaddingH)
                     
                 else
                     error('Unknown spatial convolution function : ' .. tostring(convFunction))
                 end
                 feat_extractor:add(SpatConvModule)
 
-                nOut_conv_h[layer_i] = nOut_pool_h[layer_i-1] - filtSizes[layer_i] + 1
-                nOut_conv_w[layer_i] = nOut_pool_w[layer_i-1] - filtSizes[layer_i] + 1
+                
+                nOut_conv_w[layer_i] = nOut_pool_w[layer_i-1] - filtSizes[layer_i] + 1  + nConvPaddingW*2
+                nOut_conv_h[layer_i] = nOut_pool_h[layer_i-1] - filtSizes[layer_i] + 1  + nConvPaddingH*2
 
                 -- 2. Nonlinearity (sigmoid)
                 local nlin = getNonlinearity(nLinType) 

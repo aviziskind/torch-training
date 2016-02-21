@@ -504,6 +504,13 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         error(string.format('Unknown spatial convolution function : %s', tostring(convFunction)) )
     end
     
+    local convPad_str = '';
+    local convPad_str_nice = ''
+    if networkOpts.zeroPadForConvolutions then
+        convPad_str = 'P'
+        convPad_str_nice = '(P)'
+    end
+    
     local nStates_str = table.concat(networkOpts.nStatesConv, '_') 
     local nStates_str_nice = 'nStates=' .. table.concat(networkOpts.nStatesConv, ',') .. ';' 
     if nFCLayers > 0 then
@@ -658,8 +665,8 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     
     local gpu_str = getTrainOnGPUStr(networkOpts)
     
-    local convNet_str      = convFcn_str .. nStates_str      .. filtSizes_str      .. doPooling_str      .. poolSizes_str      .. poolTypes_str      .. poolStrides_str .. gpu_str
-    local convNet_str_nice = convFcn_str .. nStates_str_nice .. filtSizes_str_nice .. doPooling_str_nice .. poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  ..  nLinType_str ..gpu_str
+    local convNet_str      = convFcn_str .. nStates_str      .. filtSizes_str      .. convPad_str      .. doPooling_str      .. poolSizes_str      .. poolTypes_str      .. poolStrides_str .. gpu_str
+    local convNet_str_nice = convFcn_str .. nStates_str_nice .. filtSizes_str_nice .. convPad_str_nice .. doPooling_str_nice .. poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  ..  nLinType_str ..gpu_str
     return convNet_str, convNet_str_nice
     
 end
