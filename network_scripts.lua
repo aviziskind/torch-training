@@ -58,18 +58,20 @@ end
 
 getNonlinearityStr = function(networkOpts)
     
-    local nLinType_str = ''
+    local nLinType_str, nLinType_str_nice = '', ''
     if networkOpts.nLinType then
        if string.lower(networkOpts.nLinType) == 'relu' then
            nLinType_str = '_rl'
+           nLinType_str_nice  = 'ReLU'
        elseif string.lower(networkOpts.nLinType) == 'tanh' then
            --nLinType_str = 'th'
+           nLinType_str_nice  = 'Tanh'
        else
             error(string.format('Unknown nonlinearity type : %s', networkOpts.nLinType));
        end
     end
 
-    return nLinType_str
+    return nLinType_str, nLinType_str_nice
 end
 
 fixConvNetParams = function(networkOpts)
@@ -661,12 +663,18 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         
     end
     
-    local nLinType_str =  getNonlinearityStr(networkOpts)
+    local nLinType_str, nLinType_str_nice =  getNonlinearityStr(networkOpts)
     
     local gpu_str = getTrainOnGPUStr(networkOpts)
     
-    local convNet_str      = convFcn_str .. nStates_str      .. filtSizes_str      .. convPad_str      .. doPooling_str      .. poolSizes_str      .. poolTypes_str      .. poolStrides_str .. gpu_str
-    local convNet_str_nice = convFcn_str .. nStates_str_nice .. filtSizes_str_nice .. convPad_str_nice .. doPooling_str_nice .. poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  ..  nLinType_str ..gpu_str
+    local dropout_str = getDropoutStr(networkOpts)
+    
+    
+    local convNet_str      = convFcn_str .. nStates_str      .. filtSizes_str      .. convPad_str      .. doPooling_str  ..
+            poolSizes_str      .. poolTypes_str      .. poolStrides_str ..  nLinType_str .. dropout_str .. gpu_str
+    local convNet_str_nice = convFcn_str .. nStates_str_nice .. filtSizes_str_nice .. convPad_str_nice .. doPooling_str_nice ..
+            poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  ..  nLinType_str_nice .. dropout_str .. gpu_str
+            
     return convNet_str, convNet_str_nice
     
 end
@@ -678,7 +686,7 @@ getTrainOnGPUStr = function(networkOpts)
     --local useCUDAmodules = networkOpts.convFunction and string.find(networkOpts.convFunction, 'CUDA')
     if networkOpts.trainOnGPU  then
         gpu_str = '_GPU'
-        if (networkOpts.gpuBatchSize > 1) then
+        if (networkOpts.gpuBatchSize and networkOpts.gpuBatchSize > 1) then
             gpu_str = '_GPU' .. tostring(networkOpts.gpuBatchSize)
         end
     end
@@ -768,8 +776,34 @@ getTrainConfig_str = function(trainConfig)
     
 end
         
+getDropoutStr = function(networkOpts)
+    
+    local dropout_str = ''
+    local dropout_default = -0.5
+    if networkOpts.dropoutPs and not isequal(networkOpts.dropoutPs, {})  and not isequal(networkOpts.dropoutPs, 0) then
+        dropout_str = '_Dr'
+        if not isequal(networkOpts.dropoutPs, dropout_default) then 
+            dropout_str = dropout_str .. toList(networkOpts.dropoutPs)
+        end
+    end
+    
+    return dropout_str
+end
 
 
+
+
+         
+torch.isClassifierCriterion = function (criterionName)
+    if criterionName == 'nn.ClassNLLCriterion' then
+        return true
+    elseif criterionName == 'nn.MSECriterion' or criterionName == 'nn.mycri' or criterionName == 'nn.mycri_kai' then
+        return false
+    else
+        error('Unknown criterion name')
+    end
+
+end
 
 
 --[[

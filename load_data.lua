@@ -49,16 +49,19 @@ convertMatToTorch = function(matfile, torchfile, convertOpts)
 
 end 
 
-globalNormalizeDataset = function(S_data)
+globalNormalizeDataset = function(S_data, meanVal, stdVal)
     SS_data = S_data
     io.write(' -- Normalizing inputs (subtracting global mean , dividing by global std. deviation)')
 
     local X = S_data.inputMatrix            
     --X:add( - X:min() )   -- subtract minimum
     --X:div( X:max() )     -- divide by max
+    
+    meanVal = meanVal or X:mean()  -- if not provided, calculate now
+    stdVal  = stdVal  or X:std()
 
-    X:add( - X:mean() )   -- subtract mean
-    X:div( X:std() )     -- divide by std
+    X:add( - meanVal )   -- subtract mean
+    X:div( stdVal )      -- divide by std
     io.write(' (done)\n')
 end
     
@@ -217,6 +220,7 @@ getDataStats = function(data)
     
     local stats = {};
     local X = data.inputMatrix
+    XX = X
     if X:nDimension() == 4 then 
         stats.nSamples     = X:size(1)
         stats.nInputPlanes = X:size(2)
@@ -228,10 +232,17 @@ getDataStats = function(data)
         stats.nSamples     = X:size(1)
         stats.nInputPlanes = 1
         
-        stats.width  = X:size(3)
-        stats.height = X:size(4)
+        stats.width  = X:size(2)
+        stats.height = X:size(3)
     else
         error('Input dataset must have at least 3 dimensions')
+    end
+    
+    if data.nClasses then
+        stats.nClasses = data.nClasses[1][1]
+    end
+    if data.nOutputs then
+        stats.nOutputs = data.nOutputs[1][1]
     end
     
     stats.nInputs = stats.width * stats.height * stats.nInputPlanes

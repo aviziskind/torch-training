@@ -1,7 +1,8 @@
 require 'image'  -- for normalization kernels
 
 generateModel = function(inputStats, networkOpts, letterOpts)
-
+    
+    --torch.manualSeed(123)
     local nInputs = inputStats.nInputs
     local nInputPlanes = inputStats.nInputPlanes or 1
     local height  = inputStats.height;        assert(height)
@@ -66,6 +67,10 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
         if finalLayer == 'LogSoftMax' then
             classifier:add(  nn.LogSoftMax() )
+        elseif finalLayer == '' then
+            -- do nothing 
+        else
+            error('Unknown final layer type : ' .. finalLayer )
         end
 
         if nPositions > 1 then
@@ -95,8 +100,10 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         local nInputPlanes = nInputPlanes or 1 
 
         local nStatesConv = networkOpts.nStatesConv
+        local nStatesFC   = networkOpts.nStatesFC
         nStatesConv[0] = nInputPlanes
         local nConvLayers = #nStatesConv
+        local nFCLayers = #nStatesFC
         --nStates_copy2 = nStatesConv
 
         --print(nStatesConv)
@@ -120,6 +127,36 @@ generateModel = function(inputStats, networkOpts, letterOpts)
             local b = x-a 
             return a, b
         end
+
+        local convLayerDropoutPs = {}
+        local fullyConnectedDropoutPs = {}
+        local dropoutPs = n.dropoutPs
+        if dropoutPs then
+            if type(dropoutPs) == 'number' then     
+                if dropoutPs > 0 then        -- dropoutPs = 0.5 : dropout in all convolutional layers with p = 0.5
+                    convLayerDropoutPs      = table.rep(dropoutPs, nFCLayers)
+                elseif dropoutPs < 0 then    -- dropoutPs = -0.5 : dropout in all fully connected layers with p = 0.5
+                    fullyConnectedDropoutPs = table.rep(-dropoutPs, nFCLayers)
+                end
+                    
+            elseif type(dropoutPs) == 'table' then
+                if dropoutPs[1] > 0 then    -- dropoutPs = {0.5, -0.5} : dropout in all convolutional layers with p = 0.5
+                    if #dropoutPs == nConvLayers then
+                        convLayerDropoutPs = dropoutPs
+                    elseif #dropoutPs == nConvLayers + nFCLayers then
+                        convLayerDropoutPs      = table.subsref(dropoutPs, table.range(1, nConvLayers))
+                        fullyConnectedDropoutPs = table.subsref(dropoutPs, table.range(nConvLayers+1, nConvLayers+nFCLayers))
+                    end
+                elseif dropoutPs[1] < 0 then
+                    fullyConnectedDropoutPs = dropoutPs
+                end
+                
+            end
+            
+        end
+
+        local doDropoutInConvLayers = #convLayerDropoutPs > 0
+        local doDropoutInFullyConnectedLayers = #fullyConnectedDropoutPs > 0
 
         if convFunction == 'SpatialConvolutionMap' and trainOnGPU then
             error('SpatialConvolutionMap cannot be trained on the GPU ...')
@@ -302,6 +339,11 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 nOut_pool_w[layer_i] = nOut_conv_w[layer_i]            
             end
             
+            
+            if doDropoutInConvLayers then  --  <== is this (after pooling) where to put it?
+                feat_extractor:add(  nn.Dropout(   convLayerDropoutPs[layer_i] ) )                
+            end
+             
             local doSpatSubtrNorm_thisLayer = doSpatSubtrNorm and string.lower(spatSubtrNormType[layer_i]) ~= 'none'
             if doSpatSubtrNorm_thisLayer then
                 local norm_kernel = getNormKernel(spatSubtrNormType[layer_i], spatSubtrNormWidth[layer_i])
@@ -348,13 +390,14 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         end
         feat_extractor:add(reshape_module)
 
-        local nStatesFC = networkOpts.nStatesFC
-        local nFClayers = #nStatesFC
-
         nUnitsInLastLayer = nOutputs_last
         -- fully-connected layers (if any)
-        if nFClayers > 0 then
+        if nFCLayers > 0 then
             for layer_i,nUnitsInThisLayer in ipairs(nStatesFC) do
+                if doDropoutInFullyConnectedLayers then
+                    feat_extractor:add(  nn.Dropout(   fullyConnectedDropoutPs[layer_i] ) )
+                end
+                
                 feat_extractor:add(  nn.Linear(nUnitsInLastLayer, nUnitsInThisLayer) )
                 
                 local nlin = getNonlinearity(nLinType) 
@@ -363,7 +406,6 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 nUnitsInLastLayer = nUnitsInThisLayer
             end
         end
-
 
         --classifier 
         classifier:add(  nn.Linear(nUnitsInLastLayer, nOutputs) )

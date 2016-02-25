@@ -160,6 +160,15 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     if useOldFile then -- not redoTrainingAlways and trainingLogger:haveFile() then
         trainingLogger_loaded = trainingLogger:loadFromFile()
         
+        ---[[
+                    if debug then
+                        T_loaded = trainingLogger_loaded
+                        if T_saved then
+                            print('Checking saved version from last time with just loaded version')
+                            assert(isequal(T_saved, T_loaded))
+                        end
+                    end
+        --]]
         
         if trainingLogger_loaded and not trainingLogger_loaded.sgd_config then
             trainingLogger_loaded.sgd_config = sgd_config_default
@@ -177,6 +186,13 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         trainingLogger:setOptions(trainingOpts)
         
         ---[[
+                    if debug then
+                        if T_saved then
+                            print('Checking saved version from last time with just loaded and force-continued version')
+                            print(isequal(T_saved.model_struct, T.model_struct))
+                            print(isequal(T_saved.model_struct, trainingLogger.model_struct))
+                        end
+                    end
         --]]
         
         nEpochsDone      = trainingLogger.nEpochs
@@ -588,7 +604,19 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local curr_trainErr_pct, prev_trainErr_pct, trainErr_pct_change_pct = 100, 100, 100
     local fs, curr_testErr_pct, prev_testErr_pct, testErr_pct_change_pct = 100, 100, 100
 
-       
+    
+                if debug then
+                    if T_saved then
+                        print('Checking before start')
+                        hash_tot_saved = networkHash(T_saved.model_struct, 1, 1)
+                        hash_tot_cur = networkHash(trainingLogger.model_struct, 1, 1)
+                        local tf = isequal(T_saved.model_struct, trainingLogger.model_struct)
+                        local tf2 = isequal(T_saved.model_struct, model_struct)
+                        local tf3 = isequal(hash_tot_saved, hash_tot_cur)
+                        print(tf, tf2, tf3)
+                    end
+               end
+   
     local checkErrBeforeStart = true
     if checkErrBeforeStart then
         curr_trainErr_pct, _, current_train_loss = testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})        
@@ -715,14 +743,14 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         
         local checkErrAfterEachEpoch = false
         if checkErrAfterEachEpoch then
-            local curr_trainErr_pct_after, _, current_train_loss_after = 
-                testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})
-
-            local curr_testErr_pct_after, _, current_test_loss_after = 
-                testModel(model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize})
-                
+            local curr_trainErr_pct_after, _, current_train_loss_after = testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})
+            --local curr_trainErr_pct_after2 = testModel(model_toTrain, trainData_use)
+            --assert(curr_trainErr_pct_after == curr_trainErr_pct_after2)
+            local curr_testErr_pct_after, _, current_test_loss_after = testModel(model_struct_forTest, testData_use, {batchSize = batchSize})        
             io.write(string.format('   Quick check: TrainLoss = %.4f. TestLoss = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
-                current_train_loss_after, current_test_loss_after, curr_trainErr_pct_after, curr_testErr_pct_after))        
+                        current_train_loss_after, current_test_loss_after, curr_trainErr_pct_after, curr_testErr_pct_after))
+                
+                
         end
         
 
@@ -747,11 +775,17 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             
             logger:println()
             
+            if debug then
+                --T_saved = table.copy(trainingLogger)
+                --Model_struct = model_struct
+                io.write(string.format('Hashes : %.4f, %.4f, %.4f\n', networkHash(model_struct.model), networkHash(model_struct.model, 1), networkHash(model_struct.model, 1, 1)))
+            end
+
         end
         model_struct.trainingDate = os.time()
 
         local timeForThisEpoch_tot = os.time() - startTime
-            io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n', 
+        io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n', 
                 nEpochsDone, current_train_loss, train_loss_change_pct, current_test_loss, test_loss_change_pct, 
                     curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, sec2hms(timeForThisEpoch_tot)))
 
@@ -760,6 +794,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         end
 
         io.write('\n')
+        --error('!')
+        --torch.save(networks_dir..'network_'.. epoch .. '.bin', model)
         do
             --error('!')
         end
@@ -777,9 +813,13 @@ end
 
 
 
+
+
+--testModel = function(model_struct, testData, verbose, getLoss)
 testModel = function(model_struct, testData, opt)
     MS =model_struct
     assert(#testData == 0)
+    Tm = testData
     opt = opt or {}
     local verbose = opt.verbose or false
     local getLoss = opt.getLoss or false
@@ -799,7 +839,7 @@ testModel = function(model_struct, testData, opt)
         model = model_struct
     end
     
-    model:evaluate()
+    model:evaluate();
     
     local groupBatch = areAnySubModulesOfType(model, 'nn.SpatialConvolutionCUDA') 
     local batchSize = 1
@@ -1017,11 +1057,18 @@ end
 --]]
 
 
---[[
 getTimeStr = function()
     return os.date("%H_%M_%S")
+    --[[
+    local s = os.date()
+    local _, st = string.find(s, '2015 ')
+    local en = string.find(s, ' %uM %u%uT')  -- e.g. AM EDT, PM EST, etc.
+    s = string.gsub( string.gsub( string.sub(s, st+1, en-1), ':', '_'), ' ', '_')    
+    return s
+    -- Mon 02 Jun 2014 03:56:20 PM EDT
+    --]]
 end
---]]
+
 
 permuteBatchDimTo4 = function(x, x_indices)
 --    print('!!')
@@ -1065,5 +1112,182 @@ selectInputBatch = function(x, x_indices)
 end
 
 
+--logger--------------------------
+-----------------------------------
+
+--[[
+getPercentCorrect = function()
+    nCorrect = 0
+    for i = 1, m do
+        local input_1 = inputs[i]
+        local target_1 = targets[i][1]
+
+        hyp_1 = model:forward(input_1, target_1)
+        _,idx_max = torch.max(hyp_1:resize(nOutputs), 1)
+
+        if idx_max[1] == target_1 then
+            nCorrect = nCorrect + 1
+        end        
+    end
+    return nCorrect / m
+end
+--]]
+
+--[[
+if opt.optimization == 'CG' then
+    config = config or {maxIter = opt.maxIter}
+    optim.cg(feval, parameters, config)
+
+elseif opt.optimization == 'LBFGS' then
+    config = config or {learningRate = opt.learningRate,
+                        maxIter = opt.maxIter,
+                        nCorrection = 10}
+    optim.lbfgs(feval, parameters, config)
+elseif opt.optimization == 'SGD' then
+    config = config or {learningRate = opt.learningRate,
+                        weightDecay = opt.weightDecay,
+                        momentum = opt.momentum,
+                        learningRateDecay = 5e-7}
+    optim.sgd(feval, parameters, config)
+elseif opt.optimization == 'ASGD' then
+    config = config or {eta0 = opt.learningRate,
+                        t0 = trsize * opt.t0}
+    _,_,average = optim.asgd(feval, parameters,config)
+
+else
+    error('unkown optimization method')
+end
+        --]]
+        
+        
+        --[[
+        
+testModel_multipleLabels = function(model_struct, testData, verbose)
+    
+    verbose = verbose or false
+
+    local model
+    if (model_struct.modelType ~= nil) then
+        model = model_struct.model
+    else
+        model = model_struct
+    end
+    
+    local nClasses = testData.nClasses
+	local testInputs = testData.inputMatrix
+	--local labels = testData.labels
+    local haveSecondLabels = testData.labels_distract ~= nil
+    local haveThirdLabels = testData.labels_distract2 ~= nil
+    --testData_copy = testData
+    --testInputs_copy
+    
+   
+    
+	local nTestSamples = testInputs:size(1)
+    --model_copy = model
+    --testInputs_copy = testInputs
+    --labels_copy = labels
+    
+    local nCorrect = 0
+	for t = 1, nTestSamples do
+
+		local pred = model:forward(testInputs[t])
+		
+        --pred = model:forward(testInputs[t], labels[t])
+        local _,idx_max = torch.max(pred:resize(nClasses), 1)
+        --local _,idx_max = torch.max(pred, 1)
+
+        if idx_max[1] == testData.labels[t] then
+            nCorrect = nCorrect + 1
+        elseif haveSecondLabels and idx_max[1] == testData.labels_distract[t] then
+            nCorrect = nCorrect + 1
+        elseif haveThirdLabels and idx_max[1] == testData.labels_distract2[t] then        
+            nCorrect = nCorrect + 1
+        end
+        
+    end
+    
+    local testErr_pct = (nTestSamples - nCorrect) / nTestSamples * 100
+        
+
+    if verbose then
+        local totalTime = toc()
+        local timeEachSample_sec = (totalTime / nTestSamples)
+        io.write(string.format('\n [sim]: %.2f ==> Total time: %.2f sec. Time for each sample = %.2f ms. ',
+                testErr_pct, totalTime, timeEachSample_sec *1000))
+        --print(testConfusionMtx)
+    end
+
+    return testErr_pct   
+   
+
+end
+--]]
 
 
+
+
+--[[
+
+train new - insert currentDate 
+retrain new  
+
+train - load
+retrain new
+
+train - load get date of training
+retrain - load *** only load if newer than previous training***
+
+
+train new (continued or something)
+retrain load
+
+--]]
+
+--[[
+
+             --local let = function(i) return string.char(i+64) end
+                
+                local idx_sample  = idxs[1] + samp_i - 1
+                _,idx_max = torch.max(pred:resize(nClasses), 1)
+                --local _,idx_max = torch.max(pred, 1)
+
+                local isCorrect = false
+                
+                if idx_max[1] == testData.labels[idx_sample] then
+                    
+                    isCorrect = true
+                elseif multipleLabels and
+                    (haveSecondLabels and (idx_max[1] == testData.labels_distract[idx_sample])) or
+                    (haveThirdLabels  and (idx_max[1] == testData.labels_distract2[idx_sample])) then
+                    
+                    isCorrect = true
+                end
+                
+                if isCorrect then
+                    nCorrect = nCorrect + 1
+                    
+                    if idx_sample < 8 then
+                        io.write('%s:%s%s%s', let(idx_max[1]), let(testData.labels[t])
+                        
+                        io.write('[Y]')
+                    else
+                        io.write('[N]')
+                    end
+                    
+                end
+--]]
+            
+            ---[[
+            
+torch.isClassifierCriterion = function (criterionName)
+    if criterionName == 'nn.ClassNLLCriterion' then
+        return true
+    elseif criterionName == 'nn.MSECriterion' or criterionName == 'nn.mycri' or criterionName == 'nn.mycri_kai' then
+        return false
+    else
+        error('Unknown criterion name')
+    end
+
+end
+--]]
