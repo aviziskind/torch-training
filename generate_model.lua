@@ -1305,7 +1305,7 @@ convertNetworkToMatlabFormat = function(model)
                 if module_str == 'SpatialConvolution' or  module_str == 'SpatialConvolutionCUDA'  then
                     
                     requiredFieldNames = {'bias', 'weight', 'nInputPlane', 'nOutputPlane', 'kH', 'kW', 'dH', 'dW'}
-                    optionalFieldNames = {'padH', 'padW'}
+                    optionalFieldNames = {'padH', 'padW', 'train'}
                     module_name_str = 'Conv'
                     
                 elseif module_str == 'SpatialConvolutionMap' then

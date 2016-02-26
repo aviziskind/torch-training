@@ -791,6 +791,25 @@ getDropoutStr = function(networkOpts)
 end
 
 
+       
+uniqueNetworks = function(allNetworks)
+
+    local tbl_networkNames = {}
+    local tbl_networkNames_nice = {}
+    for i,net in ipairs(allNetworks) do
+        local net_str, net_str_nice = getNetworkStr(net);
+        
+        table.insert(tbl_networkNames, net_str)
+        table.insert(tbl_networkNames_nice, net_str_nice)
+    end
+
+    local uniqueNames, idx_unique = table.unique(tbl_networkNames)
+    
+    local uniqueNetworks = table.subsref(allNetworks, idx_unique)
+    local uniqueNetworkNiceNames = table.subsref(tbl_networkNames_nice, idx_unique)
+    return uniqueNetworks, uniqueNetworkNiceNames, uniqueNames
+
+end
 
 
          

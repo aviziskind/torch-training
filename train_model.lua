@@ -11,8 +11,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local redoTrainingIfOld_date = 1402977793 -- (6/15, late) --  1402928294 --(6/15)      --1393876070 -- os.time()
     local forceContinueTraining = true
     local forceContinueTrainingIfBefore = 1417727482 -- (12/4)   1401632026 -- =(6/1) --  1399960186 -- 1399958480 --1393878677  -- os.time()
-    local shuffleTrainingSamples = false -- since we're mixing sets with different noise levels, want to be evenly spread out
-    local shuffleTrainingSamplesEachEpoch = false
+    local shuffleTrainingSamples = true -- since we're mixing sets with different noise levels, want to be evenly spread out
+    local shuffleTrainingSamplesEachEpoch = true
     
     
     if not shuffleTrainingSamples then
@@ -69,7 +69,6 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     end
 
     local trainConfusionMtx = optim.ConfusionMatrix(nOutputs)
-    
     
     local resizeInputToVector = model_struct.parameters.resizeInputToVector or false
     
@@ -589,22 +588,24 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local fs, curr_testErr_pct, prev_testErr_pct, testErr_pct_change_pct = 100, 100, 100
 
        
-    local checkErrBeforeStart = true
+    local checkErrBeforeStart = false and (trainingLogger.nEpochs == 0)
     if checkErrBeforeStart then
-        curr_trainErr_pct, _, current_train_loss = testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})        
+        curr_trainErr_pct, _, current_train_loss = testModel(
+            model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})        
+        
         prev_train_loss = current_train_loss
-        --curr_trainErr_pct2 = testModel(model_toTrain, trainData_use)        
-        --assert(curr_trainErr_pct2 == curr_trainErr_pct)
-        curr_testErr_pct, _, current_test_loss = testModel(model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize})        prev_test_loss = current_test_loss
+        
+        curr_testErr_pct, _, current_test_loss = testModel(
+            model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize})        
+        prev_test_loss = current_test_loss
         
         io.write(string.format('   Quick check: Train Loss = %.4f, Test Loss = %.4f, TrainErr = %.2f. TestErr = %.1f\n', 
                     current_train_loss, current_test_loss, curr_trainErr_pct, curr_testErr_pct))
-        prev_train_loss = current_train_loss
-        prev_test_loss = current_test_loss
+        prev_train_loss   = current_train_loss
+        prev_test_loss    = current_test_loss
         prev_trainErr_pct = curr_trainErr_pct
-        prev_testErr_pct = curr_testErr_pct
+        prev_testErr_pct  = curr_testErr_pct
     end
-    
     
     
     
