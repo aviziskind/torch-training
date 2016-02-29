@@ -1054,10 +1054,12 @@ replaceClassifierLayer = function(model_struct, nOutputs)
 end
 
 
-splitModelAfterLayer = function(model_struct, splitLayer)
-
+splitModelFromLayer = function(model_struct, splitLayer, splitAfterFlag) 
+    -- default is to split just BEFORE the specified layer
+    -- add a third argument as a flag to split just AFTER that layer
+    
     local full_model = getStreamlinedModel(model_struct.model)
-    local addCopyUnitsForGPUmodel = true
+    local addCopyUnitsForGPUmodel = false
     --local modelSequence = getModelSequence(model_struct.model)
     local splitLayer_str
     if type(splitLayer) == 'string' then
@@ -1072,7 +1074,12 @@ splitModelAfterLayer = function(model_struct, splitLayer)
         assert( splitLayer ~= -1) -- this would be splitting *after* the last layer, ie. not splitting at all.
         splitLayer = nModules - (-splitLayer) + 1   --     -1 = last layer
     end
-    print(string.format('\nSplitting the network from %s (layer #%d)\n', splitLayer_str, splitLayer))
+    if splitAfterFlag then
+        print(string.format('\nSplitting the network just after %s (layer #%d)\n', splitLayer_str, splitLayer))
+        splitLayer = splitLayer + 1
+    else
+        print(string.format('\nSplitting the network just before  %s (layer #%d)\n', splitLayer_str, splitLayer))
+    end
 
     local feat_extractor = nn.Sequential() --- before split
     local classifier = nn.Sequential()  --- after split
@@ -1277,16 +1284,18 @@ convertNetworkToMatlabFormat = function(model)
         for mod_j, module_i in ipairs(modules) do
 
             Module_i = module_i
-            local module_full_str = tostring(module_i)
+            local module_full_str = torch.typename(module_i)
             --print(module_full_str )
             assert(string.sub(module_full_str, 1, 3) == 'nn.')
 
             local module_str = string.sub(module_full_str, 4, #module_full_str) -- remove 'nn.' prefix.
             
+            --[[    no longer necessary if we use torch.typename instead of tostring
             local idx_bracket = string.find(module_str, '[(]') -- remove parenthetical descriptors ( e.g. SpatialConvolution(1 -> 16, 5x5)  )
             if idx_bracket then
                 module_str = string.sub(module_str, 1, idx_bracket-1)
             end
+            --]]
             
 
             local j = net.nModules

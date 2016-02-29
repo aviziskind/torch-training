@@ -685,7 +685,7 @@ getTrainOnGPUStr = function(networkOpts)
     local gpu_str = ''
     --local useCUDAmodules = networkOpts.convFunction and string.find(networkOpts.convFunction, 'CUDA')
     if networkOpts.trainOnGPU  then
-        gpu_str = '_GPU'
+        --gpu_str = '_GPU'  --> now, only add this if batchSize > 1.
         if (networkOpts.gpuBatchSize and networkOpts.gpuBatchSize > 1) then
             gpu_str = '_GPU' .. tostring(networkOpts.gpuBatchSize)
         end

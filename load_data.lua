@@ -239,10 +239,16 @@ getDataStats = function(data)
     end
     
     if data.nClasses then
-        stats.nClasses = data.nClasses[1][1]
+        stats.nClasses = data.nClasses
+        if torch.isTensor(stats.nClasses) then
+            stats.nClasses = stats.nClasses[1][1]
+        end
     end
     if data.nOutputs then
-        stats.nOutputs = data.nOutputs[1][1]
+        stats.nOutputs = data.nOutputs
+        if torch.isTensor(stats.nOutputs) then
+            stats.nOutputs = stats.nOutputs[1][1]
+        end
     end
     
     stats.nInputs = stats.width * stats.height * stats.nInputPlanes
