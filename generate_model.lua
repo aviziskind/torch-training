@@ -1305,7 +1305,7 @@ convertNetworkToMatlabFormat = function(model)
                 if module_str == 'SpatialConvolution' or  module_str == 'SpatialConvolutionCUDA'  then
                     
                     requiredFieldNames = {'bias', 'weight', 'nInputPlane', 'nOutputPlane', 'kH', 'kW', 'dH', 'dW'}
-                    optionalFieldNames = {'padH', 'padW', 'train'}
+                    optionalFieldNames = {'padH', 'padW'}
                     module_name_str = 'Conv'
                     
                 elseif module_str == 'SpatialConvolutionMap' then
@@ -1359,11 +1359,14 @@ convertNetworkToMatlabFormat = function(model)
 
                 elseif (module_str == 'Square') or (module_str == 'Sqrt') or (module_str == 'Copy') or 
                     (module_str == 'Tanh') or (module_str == 'LogSoftMax') or (module_str == 'Exp')  then     
-
+                    
                 else                
                     error('Unhandled case : module type = ' .. module_str)
 
                 end
+                
+                optionalFieldNames = table.merge(optionalFieldNames, {'train'})
+            
 
             
                 -- check that didn't leave any fields out:
