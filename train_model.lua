@@ -293,9 +293,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         local sampleInput = orig_trainInputs[sampleIdxs]
         local sample_outputFromFeat = feat_extractor:forward(sampleInput)     -- pass one sample through 
         feat_extr_nOutputs = torch.nElements( sample_outputFromFeat )   -- so we can see how many elements the output has
+        Smp = sample_outputFromFeat
         
-        local sample_size = sample_outputFromFeat:size()
-        if ( #sample_size == 1 ) or (groupBatch and #sample_size == 2) then
+        local feat_extr_outputSize = sample_outputFromFeat:size()
+        if ( #feat_extr_outputSize == 1 ) or (groupBatch and #feat_extr_outputSize == 2) then
             resizeInputToVector = true
         end                                                   
         local sizeOfNewTrainInputs_MB =  ( nTrainingSamples * feat_extr_nOutputs * 4)/(1024*1024)
@@ -305,7 +306,6 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         -- double check that new features can be successfully passed to the classifier
         local sample_outputFromClass = classifier:forward(sample_outputFromFeat)
         assert( torch.nElements( sample_outputFromClass )  == nOutputs)
-
 
 
         print(string.format('New features have %d elements (instead of the original of %d)\n', torch.nElements(sample_outputFromFeat), torch.nElements( sampleInput )  ))
@@ -327,8 +327,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         if usePreExtractedFeatures then
             model_forTest = classifier
                   
-            print(string.format('Creating new training input tensor (%d x %d) (%.1f MB)',  nTrainingSamples, feat_extr_nOutputs,   sizeOfNewTrainInputs_MB ))
-            local newTrainInputs = torch.Tensor(nTrainingSamples, 1, feat_extr_nOutputs):typeAs(sample_outputFromFeat)   -- if output from feat_extrator, is a cudaTensor, make new inputs are same type.
+            print(string.format('Creating new training data : %d samples of size %s (%.1f MB)', 
+                    nTrainingSamples, toList( feat_extr_outputSize, nil, ' x '),  sizeOfNewTrainInputs_MB ))
+            local newInputSize = torch.concat(nTrainingSamples, feat_extr_outputSize)
+            local newTrainInputs = torch.Tensor(newInputSize):typeAs(sample_outputFromFeat)   -- if output from feat_extrator, is a cudaTensor, make new inputs are same type.
             
             progressBar.init(nTrainingSamples, 20)
             local samp_idx = {{}}
@@ -350,8 +352,11 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                              nInputs = feat_extr_nOutputs, nOutputs = nOutputs, nPositions = trainData.nPositions} 
                 
             if haveTestData then
-                print(string.format('Creating new test input tensor (%d x %d) (%.1f MB)',  nTestSamples, feat_extr_nOutputs, sizeOfNewTestInputs_MB ))
-                local newTestInputs = torch.Tensor(nTestSamples, 1, feat_extr_nOutputs):typeAs(sample_outputFromFeat)
+                print(string.format('Creating new test data : %d samples of size  %s (%.1f MB)',  
+                        nTestSamples, toList( feat_extr_outputSize, nil, ' x '), sizeOfNewTestInputs_MB ))
+                local newInputSize = torch.concat(nTestSamples, feat_extr_outputSize)
+                
+                local newTestInputs = torch.Tensor(newInputSize):typeAs(sample_outputFromFeat)
                 local samp_idx = {{}}
                 progressBar.init(nTestSamples, 20)
                 for i = 1,nTestSamples do
@@ -433,7 +438,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
                     
                 input = trainInputs[trainingIdxs[_idx_]]    
-                if freezeFeatures and not usePreExtractedFeatures then   -- extract features now to pass the the (trainable) classifier
+                if freezeFeatures and not usePreExtractedFeatures then   -- extract features now to pass to the (trainable) classifier
                     input = feat_extractor:forward(input)
                     count = count + 1
                 end
