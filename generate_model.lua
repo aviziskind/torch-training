@@ -128,31 +128,57 @@ generateModel = function(inputStats, networkOpts, letterOpts)
             return a, b
         end
 
-        local convLayerDropoutPs = {}
-        local fullyConnectedDropoutPs = {}
+        local convPs, fcPs
+        local convLayerDropoutPs = table.rep(0, nConvLayers)
+        local fullyConnectedDropoutPs = table.rep(0, nFCLayers)
+        
         local dropoutPs = n.dropoutPs
+        local useSpatialDropout = n.spatialDropout
         if dropoutPs then
             if type(dropoutPs) == 'number' then     
-                if dropoutPs > 0 then        -- dropoutPs = 0.5 : dropout in all convolutional layers with p = 0.5
-                    convLayerDropoutPs      = table.rep(dropoutPs, nFCLayers)
+                if dropoutPs > 0 then        -- dropoutPs = 0.5 : dropout after final convolutional layer with p = 0.5
+                    convPs = {dropoutPs}
                 elseif dropoutPs < 0 then    -- dropoutPs = -0.5 : dropout in all fully connected layers with p = 0.5
-                    fullyConnectedDropoutPs = table.rep(-dropoutPs, nFCLayers)
+                    fcPs = {-dropoutPs} --fullyConnectedDropoutPs = table.rep(-dropoutPs, nFCLayers)
                 end
                     
+                    
             elseif type(dropoutPs) == 'table' then
-                if dropoutPs[1] > 0 then    -- dropoutPs = {0.5, -0.5} : dropout in all convolutional layers with p = 0.5
-                    if #dropoutPs == nConvLayers then
-                        convLayerDropoutPs = dropoutPs
-                    elseif #dropoutPs == nConvLayers + nFCLayers then
-                        convLayerDropoutPs      = table.subsref(dropoutPs, table.range(1, nConvLayers))
-                        fullyConnectedDropoutPs = table.subsref(dropoutPs, table.range(nConvLayers+1, nConvLayers+nFCLayers))
+                local idx_firstPos = table.find(dropoutPs, function (x) return x>0; end)
+                local idx_firstNeg = table.find(dropoutPs, function (x) return x<0; end)
+                local convPs, fcPs
+                if idx_firstPos ~= nil then
+                    if idx_firstNeg ~= nil then
+                        convPs, fcPs = table.split(dropoutPs, idx_firstNeg)
+                    else
+                        convPs = dropoutPs
                     end
-                elseif dropoutPs[1] < 0 then
-                    fullyConnectedDropoutPs = dropoutPs
+                elseif idx_firstNeg then
+                    fcPs = dropoutPs
+                end
+            end
+                
+            if convPs then
+                assert(#convPs <= nConvLayers)
+                for j = 1,#convPs do
+                    convLayerDropoutPs[nConvLayers - #convPs + j] =  convPs[j]
+                end
+            end
+                
+            if fcPs then    -- dropoutPs = {0.5, -0.5} : dropout in all convolutional layers with p = 0.5
+                fullyConnectedDropoutPs = table.apply(fcPs, function(x) return -x; end)  -- extend
+                if #fcPs == nFCLayers then
+                    fullyConnectedDropoutPs = fcPs  
+                else
+                    assert(#fcPs == 1)
+                    fullyConnectedDropoutPs = table.rep(-fcPs[1], nFCLayers)
                 end
                 
             end
-            
+            --print(convPs)
+            --print('convLayerDropoutPs', convLayerDropoutPs)
+            --print('fullyConnectedDropoutPs', fullyConnectedDropoutPs)
+                            
         end
 
         local doDropoutInConvLayers = #convLayerDropoutPs > 0
@@ -312,10 +338,10 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                         --local padLeft, padRight  = nPad_w, 0
                         local zeroPaddingModule = nn.SpatialZeroPadding(padLeft, padRight, padTop, padBottom)
                         --print(string.format('   output of layer %d : %dx%d\n', layer_i, nOut_pool_h[layer_i], nOut_pool_w[layer_i]))
-                        print(string.format('  >> Warning : Pooling in layer %d would drop %d from the height and %d from the width.',
-                                layer_i, dropped_pixels_h, dropped_pixels_w))
-                        print(string.format('  >> So we are adding %d x %d of zero padding [L%d, R%d, T%d, B%d] before adding the pooling module',
-                                nPad_h, nPad_w,padLeft, padRight, padTop, padBottom))
+                        --print(string.format('  >> Warning : Pooling in layer %d would drop %d from the height and %d from the width.',
+                          --      layer_i, dropped_pixels_h, dropped_pixels_w))
+                        --print(string.format('  >> So we are adding %d x %d of zero padding [L%d, R%d, T%d, B%d] before adding the pooling module',
+                          --      nPad_h, nPad_w,padLeft, padRight, padTop, padBottom))
 
                         feat_extractor:add(zeroPaddingModule)
 
@@ -340,8 +366,12 @@ generateModel = function(inputStats, networkOpts, letterOpts)
             end
             
             
-            if doDropoutInConvLayers then  --  <== is this (after pooling) where to put it?
-                feat_extractor:add(  nn.Dropout(   convLayerDropoutPs[layer_i] ) )                
+            if doDropoutInConvLayers and (convLayerDropoutPs[layer_i] > 0) then  --  <== is this (after pooling) where to put it?
+                if useSpatialDropout then
+                    feat_extractor:add(  nn.SpatialDropout(   convLayerDropoutPs[layer_i] ) )                
+                else
+                    feat_extractor:add(  nn.Dropout(   convLayerDropoutPs[layer_i] ) )                
+                end
             end
              
             local doSpatSubtrNorm_thisLayer = doSpatSubtrNorm and string.lower(spatSubtrNormType[layer_i]) ~= 'none'
@@ -394,9 +424,6 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         -- fully-connected layers (if any)
         if nFCLayers > 0 then
             for layer_i,nUnitsInThisLayer in ipairs(nStatesFC) do
-                if doDropoutInFullyConnectedLayers then
-                    feat_extractor:add(  nn.Dropout(   fullyConnectedDropoutPs[layer_i] ) )
-                end
                 
                 feat_extractor:add(  nn.Linear(nUnitsInLastLayer, nUnitsInThisLayer) )
                 
@@ -404,6 +431,11 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 feat_extractor:add(  nlin )
 
                 nUnitsInLastLayer = nUnitsInThisLayer
+                
+                if doDropoutInFullyConnectedLayers and (fullyConnectedDropoutPs[layer_i] > 0) then --- moved  dropout to be AFTER each fully connected layer
+                    feat_extractor:add(  nn.Dropout(   fullyConnectedDropoutPs[layer_i] ) )
+                end
+
             end
         end
 
@@ -1366,6 +1398,10 @@ convertNetworkToMatlabFormat = function(model)
                 elseif (module_str == 'Sqrt') then
                     requiredFieldNames = {'eps'}
 
+                elseif (module_str == 'Dropout') or (module_str == 'SpatialDropout')  then
+                    requiredFieldNames = {'p', 'noise'}
+                    optionalFieldNames = {'v2'}  -- for regular dropout
+                
                 elseif (module_str == 'Square') or (module_str == 'Sqrt') or (module_str == 'Copy') or 
                     (module_str == 'Tanh') or (module_str == 'LogSoftMax') or (module_str == 'Exp')  then     
                     

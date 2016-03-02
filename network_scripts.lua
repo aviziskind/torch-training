@@ -781,7 +781,11 @@ getDropoutStr = function(networkOpts)
     local dropout_str = ''
     local dropout_default = -0.5
     if networkOpts.dropoutPs and not isequal(networkOpts.dropoutPs, {})  and not isequal(networkOpts.dropoutPs, 0) then
-        dropout_str = '_Dr'
+        if networkOpts.spatialDropout then
+            dropout_str = '_Dr'
+        else
+            dropout_str = '_SDr'
+        end
         if not isequal(networkOpts.dropoutPs, dropout_default) then 
             dropout_str = dropout_str .. toList(networkOpts.dropoutPs)
         end

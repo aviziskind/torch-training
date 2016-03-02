@@ -23,6 +23,11 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     trainingOpts = trainingOpts or {}
     local haveTestData = testData ~= nil 
+    local haveSecondTestData = trainingOpts.test2Data ~= nil
+    local test2Data = trainingOpts.test2Data
+    if haveSecondTestData then
+        print('>> Have a second test set << ')
+    end
     
     local freezeFeatures = trainingOpts.freezeFeatures or false-- copy this value, in case overwritten by loading from file
     local debug = false
@@ -63,6 +68,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         --model_struct.criterion = model_struct.criterion:float()
     end
     
+    local reprocessInputs = trainingOpts.reprocessInputs
     
     if trainOnIndividualPositions then
         nOutputs = nOutputs * trainData.nPositions                
@@ -431,8 +437,14 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 end
                 
     
-                    
                 input = trainInputs[trainingIdxs[_idx_]]    
+                
+                if reprocessInputs then
+                    input_beforeReprocessing = input
+                    input = trainingOpts.reprocessInputs(input)
+                    input_afterReprocessing = input
+                end
+                
                 if freezeFeatures and not usePreExtractedFeatures then   -- extract features now to pass the the (trainable) classifier
                     input = feat_extractor:forward(input)
                     count = count + 1
@@ -583,20 +595,23 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 
     local current_train_loss, prev_train_loss, train_loss_change_pct = 0,0,0
     local current_test_loss, prev_test_loss, test_loss_change_pct = 0,0,0
+    local current_test2_loss, prev_test2_loss, test2_loss_change_pct = 0,0,0
     local current_train_loss_extraCrit, current_test_loss_extraCrit = 0,0
     local curr_trainErr_pct, prev_trainErr_pct, trainErr_pct_change_pct = 100, 100, 100
-    local fs, curr_testErr_pct, prev_testErr_pct, testErr_pct_change_pct = 100, 100, 100
+    local curr_testErr_pct, prev_testErr_pct, testErr_pct_change_pct = 100, 100, 100
+    local curr_test2Err_pct, prev_test2Err_pct, test2Err_pct_change_pct = 100, 100, 100
+    local fs
 
        
     local checkErrBeforeStart = false and (trainingLogger.nEpochs == 0)
     if checkErrBeforeStart then
         curr_trainErr_pct, _, current_train_loss = testModel(
-            model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})        
+            model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize, reprocessInputs = reprocessInputs})        
         
         prev_train_loss = current_train_loss
         
         curr_testErr_pct, _, current_test_loss = testModel(
-            model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize})        
+            model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize, reprocessInputs = reprocessInputs})        
         prev_test_loss = current_test_loss
         
         io.write(string.format('   Quick check: Train Loss = %.4f, Test Loss = %.4f, TrainErr = %.2f. TestErr = %.1f\n', 
@@ -653,7 +668,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             _, fs = lbfgs_func(feval, parameters, lbfgs_params)
             current_train_loss = fs[1]
     
-            curr_trainErr_pct = testModel(model_struct_forTest, trainData_use, {verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize}) -- L-BFGS does multiple loops
+            curr_trainErr_pct = testModel(model_struct_forTest, trainData_use, {verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize, reprocessInputs = reprocessInputs}) -- L-BFGS does multiple loops
                 
         end
        
@@ -675,19 +690,31 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             
             if haveTestData then
                 curr_testErr_pct, _, current_test_loss, t_elapsed_sec = 
-                    testModel(model_struct_forTest, testData_use, {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize})        
+                    testModel(model_struct_forTest, testData_use, {getLoss = true, verbose = showTrainTestTime, 
+                                test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize, reprocessInputs = reprocessInputs})        
             else
                 curr_testErr_pct = 0
             end
+        
+            if haveSecondTestData then
+                curr_test2Err_pct, _, current_test2_loss, t_elapsed_sec = 
+                    testModel(model_struct_forTest, test2Data, {getLoss = true, verbose = showTrainTestTime, 
+                                test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize, reprocessInputs = reprocessInputs})        
+            else
+                curr_test2Err_pct = 0
+            end
+        
         
         if extraCriterion then
             model_struct_forTest.criterion = extraCriterion
             
             _, _, current_train_loss_extraCrit = testModel(model_struct_forTest, trainData_use, 
-                {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize})        
+                {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, 
+                        batchSize = batchSize, reprocessInputs = reprocessInputs})        
 
             _, _, current_test_loss_extraCrit =  testModel(model_struct_forTest, testData_use, 
-                {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize})        
+                {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, 
+                    batchSize = batchSize, reprocessInputs = reprocessInputs})        
                 
             model_struct_forTest.criterion = origCriterion
             
@@ -700,6 +727,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
 
         test_loss_change_pct = (current_test_loss - prev_test_loss)/prev_test_loss * 100
         prev_test_loss = current_test_loss;
+        
+        test2_loss_change_pct = (current_test2_loss - prev_test2_loss)/prev_test2_loss * 100
+        prev_test2_loss = current_test2_loss;
         
         --io.write('[print]')
         
@@ -717,10 +747,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         local checkErrAfterEachEpoch = false
         if checkErrAfterEachEpoch then
             local curr_trainErr_pct_after, _, current_train_loss_after = 
-                testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize})
+                testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize, reprocessInputs = reprocessInputs})
 
             local curr_testErr_pct_after, _, current_test_loss_after = 
-                testModel(model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize})
+                testModel(model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize, reprocessInputs = reprocessInputs})
                 
             io.write(string.format('   Quick check: TrainLoss = %.4f. TestLoss = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
                 current_train_loss_after, current_test_loss_after, curr_trainErr_pct_after, curr_testErr_pct_after))        
@@ -738,23 +768,37 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             logger:add{['Epoch'] = nEpochsDone}        
             logger:add{['Train Cost'] = current_train_loss}
             logger:add{['Test  Cost'] = current_test_loss}
+            if haveSecondTestData then
+                logger:add{['Test2 Cost'] = current_test2_loss}
+            end
             logger:add{['Train Err'] = curr_trainErr_pct}
             logger:add{['Test Err'] = curr_testErr_pct}
-            logger:add{['Time'] = timeForThisEpoch}
+            if haveSecondTestData then
+                logger:add{['Test2 Err'] = curr_test2Err_pct}
+            end
+            
             if extraCriterion then
                 logger:add{['Train Cost 2'] = current_train_loss_extraCrit}
                 logger:add{['Test  Cost 2'] = current_test_loss_extraCrit}
             end
-            
+            logger:add{['Time'] = timeForThisEpoch}
+                
             logger:println()
             
         end
         model_struct.trainingDate = os.time()
 
         local timeForThisEpoch_tot = os.time() - startTime
-            io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n', 
+        io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n', 
                 nEpochsDone, current_train_loss, train_loss_change_pct, current_test_loss, test_loss_change_pct, 
                     curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, sec2hms(timeForThisEpoch_tot)))
+
+        if haveSecondTestData then
+            io.write(string.format('    [Second test set: Cost = %.4f (%+.2f%%). Test : %.4f]\n', 
+                        current_test2_loss, test2_loss_change_pct,  curr_test2Err_pct))
+           
+        end
+
 
         if extraCriterion then
             io.write(string.format('    [Extra Criterion: Train: %.4f. Test : %.4f]\n', current_train_loss_extraCrit, current_test_loss_extraCrit))
@@ -779,16 +823,19 @@ end
 
 
 testModel = function(model_struct, testData, opt)
-    MS =model_struct
+    MSS =model_struct
+    TSS = testData
     assert(#testData == 0)
     opt = opt or {}
     local verbose = opt.verbose or false
     local getLoss = opt.getLoss or false
     local multipleLabels = opt.multipleLabels or false
     local test_indiv_pos = opt.test_indiv_pos or false
-    local nOutputs = testData.nClasses or testData.nOutputs
+    nOutputs = testData.nClasses or testData.nOutputs
     local returnPctCorrect = opt.returnPctCorrect or false 
-    
+    if torch.isTensor(nOutputs) then
+        nOutputs = nOutputs[1][1]
+    end
 
     tic()
     local model
@@ -866,7 +913,10 @@ testModel = function(model_struct, testData, opt)
     local nBatches = math.ceil(nTestSamples / batchSize)
     local pred
     
-    progressBar.init(nBatches, 20)
+    local doProgressBar = opt.doProgressBar or true
+    if doProgressBar then
+        progressBar.init(nBatches, 20)
+    end
 	for batch_i = 1, nBatches do
 
         
@@ -881,7 +931,11 @@ testModel = function(model_struct, testData, opt)
             --Preds = M:forward(TestInputs[{ idxs }])
             targets = outputs[{idxs}] 
         else
-            preds = model:forward(testInputs[{ idxs[1] }])
+            local input = testInputs[{ idxs[1] }]
+            if  opt.reprocessInputs then
+                input = opt.reprocessInputs(input)
+            end
+            preds = model:forward( input )
             targets = outputs[{idxs[1]}] 
         end
         
@@ -956,10 +1010,15 @@ testModel = function(model_struct, testData, opt)
             
         end
         
-        progressBar.step()
+        if doProgressBar then
+            progressBar.step()
+        end
         
 	end
-    progressBar.done()
+        
+    if doProgressBar then
+        progressBar.done()
+    end
     
  
     if verbose then
