@@ -893,6 +893,7 @@ testModel = function(model_struct, testData, opt)
     --testInputs_copy
 	i = 0;
     if verbose then
+        tic()
         --print('==> testing ')
     end
     
@@ -1025,12 +1026,9 @@ testModel = function(model_struct, testData, opt)
     end
     
  
+    local totalTime
     if verbose then
-        local totalTime = toc()
-        local timeEachSample_sec = (totalTime / nTestSamples)
-        io.write(string.format('\n [test]: %.2f ==> Total time: %.3f sec. Time for each sample = %.3f ms. \n', 
-                testErr_pct_total, totalTime, timeEachSample_sec *1000))
-        --print(testConfusionMtx)
+        totalTime = toc()
     end
 
     local t_elapsed = toc()
@@ -1064,7 +1062,12 @@ testModel = function(model_struct, testData, opt)
     end
 
   
-        
+    if verbose then
+        local timeEachSample_sec = (totalTime / nTestSamples)
+        io.write(string.format('\n [test]: %.2f ==> Total time: %.3f sec. Time for each sample = %.3f ms. \n', 
+                testErr_pct_total, totalTime, timeEachSample_sec *1000))
+        --print(testConfusionMtx)
+    end
     
     if returnPctCorrect then
         local testCorrect_pct     = 100 - testErr_pct_total            -- a number
