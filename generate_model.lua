@@ -1335,7 +1335,7 @@ convertNetworkToMatlabFormat = function(model)
 
             local j = net.nModules
 
-            if string.sub(module_str, 1, 10) == 'Sequential' then
+            if string.sub(module_str, 1, 10) == 'Sequential'  then
 --                net.networkStr = net.networkStr .. module_full_str .. '
 
                 net = addModules(net, module_i.modules)
@@ -1384,6 +1384,12 @@ convertNetworkToMatlabFormat = function(model)
                     optionalFieldNames = {'padH', 'padW', 'ceil_mode'}
                     module_name_str = 'MaxPool'
                 
+                elseif module_str == 'SpatialLPPooling' then
+                
+                    requiredFieldNames = {'kH', 'kW', 'dH', 'dW'}   -- indices optional?
+                    optionalFieldNames = {} --'padH', 'padW',}
+                    module_name_str = 'LPPool'
+                
                 elseif module_str == 'Reshape' then
                 
                     requiredFieldNames = {'nelement', 'vector', 'size', 'batchsize'}
@@ -1400,6 +1406,9 @@ convertNetworkToMatlabFormat = function(model)
 
                 elseif (module_str == 'Sqrt') then
                     requiredFieldNames = {'eps'}
+                
+                elseif (module_str == 'Power') then
+                    requiredFieldNames = {'pow'}
 
                 elseif (module_str == 'Dropout') or (module_str == 'SpatialDropout')  then
                     requiredFieldNames = {'p', 'noise'}
@@ -1409,7 +1418,11 @@ convertNetworkToMatlabFormat = function(model)
                     (module_str == 'Tanh') or (module_str == 'LogSoftMax') or (module_str == 'Exp')  then     
                     
                 else                
-                    error('Unhandled case : module type = ' .. module_str)
+                    io.write('Unhandled case : module type = ' .. module_str)
+                    io.write('Fieldnames are: ')
+                    
+                    print(table.fieldnames(module_i))
+                    error('Fix to include this module')
 
                 end
                 
@@ -1422,13 +1435,13 @@ convertNetworkToMatlabFormat = function(model)
                 H = allfieldnames_have
                 local fieldNames_copied = table.merge(requiredFieldNames, optionalFieldNames)
                 allfieldnames_have = table.setdiff(allfieldnames_have, {'_input', 'gradInput', 'finput', 'fgradInput', 
-                        'output', '_gradOutput', 'gradBias','gradWeight' })
+                        'output', '_gradOutput', 'gradBias','gradWeight', 'modules'})
                 
                 local extraFields_lookedFor = table.setdiff(requiredFieldNames, allfieldnames_have)
                 local missingFields_notCopied = table.setdiff(allfieldnames_have, table.merge(requiredFieldNames, optionalFieldNames))
                 
                 if #extraFields_lookedFor > 0 then
-                    print('Module ', mod_j, module_full_str, 'These fields were looked for, but not not present : ', extraFields)
+                    print('Module ', mod_j, module_full_str, 'These fields were looked for, but not not present : ', extraFields_lookedFor)
                     error('Some fields were not present')
                 end
                 
@@ -1477,7 +1490,12 @@ convertNetworkToMatlabFormat = function(model)
                     end
                 end
                 
-                
+              
+                -- some modules (like SpatialLPPooling) have submodules, even though are not Sequential types. add on their modules here
+                if module_i.modules  then
+                    net = addModules(net, module_i.modules)
+                end
+              
               
             end
         end    
