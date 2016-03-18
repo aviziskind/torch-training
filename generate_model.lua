@@ -1152,7 +1152,8 @@ splitModelFromLayer = function(model_struct, splitLayer, splitAfterFlag)
             assert(torch.typename(curModule) == 'nn.Copy')
         end
 
-        if layer_i > 1 and string.find(torch.typename(curModule), 'SpatialConv') then
+        if layer_i > 1 and (layer_i ~= splitLayer) and 
+            ( string.find(torch.typename(curModule), 'SpatialConv') or string.find(torch.typename(curModule), 'Reshape')) then
             io.write('\n    ')
         end
         io.write(string.format('%s; ', torch.typename(curModule) ))
