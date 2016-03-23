@@ -1071,7 +1071,7 @@ testModel = function(model_struct, testData, opt)
 	end
         
     if doProgressBar then
-        progressBar.done()
+        progressBar.done(opt.removeProgressBarWhenDone)
     end
     
  
