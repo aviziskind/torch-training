@@ -14,11 +14,16 @@ getNetworkStr = function(networkOpts)
         error('Unknown network type : ' .. networkOpts.netType)
     end
     
-    local trainConfig_str = '';
     if networkOpts.trainConfig then
-        trainConfig_str = getTrainConfig_str(networkOpts.trainConfig)
+        local trainConfig_str = getTrainConfig_str(networkOpts.trainConfig)
         netStr = netStr .. trainConfig_str
     end
+        
+    if networkOpts.partModelOpts then  
+        local partModelOpts_str = '_' .. getPartModelOptStr(networkOpts.partModelOpts)  -- e.g. indep_90 (independent scales, 90x90 input)
+        netStr = netStr .. partModelOpts_str
+    end
+        
         
     return  netStr, netStr_nice
 
@@ -76,7 +81,6 @@ end
 
 fixConvNetParams = function(networkOpts)
      
-    local validPoolTypes = {1, 2, 'MAX'}
     local validSpatialNormTypes = {'none', 'gauss'}
     
     if (#networkOpts > 1) or networkOpts[1] then
@@ -133,11 +137,8 @@ fixConvNetParams = function(networkOpts)
     end
         
     
-    local makeSureFieldIsCorrectLength = function(fieldName, validValues)
+    local makeSureFieldIsCorrectLength = function(fieldName, isValid_func)
         -- make sure is in table format (if was a number)
-        --NetworkOpts = networkOpts
-        --FieldName = fieldName
-        --print(networkOpts[fieldName])
         
         if type(networkOpts[fieldName]) == 'number' or type(networkOpts[fieldName]) == 'string' then   -- num2tbl
             networkOpts[fieldName] = {networkOpts[fieldName]}
@@ -169,25 +170,12 @@ fixConvNetParams = function(networkOpts)
         end
 
         
-        if validValues then
-            if not type(validValues) == 'table' then
-                validValues = {validValues}
-            end
-                
+        if isValid_func then          
             for i = 1,nConvLayers do
-                local value_ok = false
-                for j = 1,#validValues do
-                    if isequal(string.lower(networkOpts[fieldName][i]), string.lower( validValues[j]) ) then
-                        value_ok = true;
-                    end
+                if not isValid_func( networkOpts[fieldName][i] ) then                    
+                    error(string.format('Error for field %s : %s\n  (did not satisfy criteria function)', fieldName, networkOpts[fieldName][i] ) );
                 end
-                if not (value_ok) then
-                    
-                    error(string.format('Unknown %s type : %s\n  (did not match any of these: %s)', fieldName, networkOpts[fieldName][i],                      table.concat(validValues, ', ')) );
-                end
-                
             end
-                
             
         end   
         
@@ -195,7 +183,8 @@ fixConvNetParams = function(networkOpts)
     end
     
     
-    makeSureFieldIsCorrectLength('filtSizes')
+    local isNumeric = function(x) return ( type(x) == 'number') end
+    makeSureFieldIsCorrectLength('filtSizes', isNumeric)
     
     
     -- if any filtSizes == 0, set corresponding nStates equal to the number of states in the previous layer.
@@ -222,17 +211,19 @@ fixConvNetParams = function(networkOpts)
     else
         
         --- (1) poolSizes
-        makeSureFieldIsCorrectLength('poolSizes')
+        makeSureFieldIsCorrectLength('poolSizes', isNumeric)
         
         --- (2) poolStrides
         if networkOpts.poolStrides == 'auto' then
             networkOpts.poolStrides = networkOpts.poolSizes
         end
         
-        makeSureFieldIsCorrectLength('poolStrides')
+        --local isValidPoolStride = function(x) return ( type(x) == 'number' or x == 'AUTO' ) end        
+        makeSureFieldIsCorrectLength('poolStrides', isNumeric)
         
         --- (3) poolTypes        
-        makeSureFieldIsCorrectLength('poolTypes', validPoolTypes)        
+        local isValidPoolType = function(x) return ( type(x) == 'number' or x == 'MAX' ) end
+        makeSureFieldIsCorrectLength('poolTypes', isValidPoolType)
         
         -- if any layer has no pooling (poolSize == 0 or 1), set the stride & type to 0
         for i = 1, nConvLayers do  
@@ -268,6 +259,8 @@ fixConvNetParams = function(networkOpts)
     -- SUBTRACTIVE Normalization and    DIVISIVE Normalization
 
     local allSpatialNormTypes = {'Subtr', 'Div'}
+    local validNormTypes = {'Gauss'};
+    local isValidSpatialNormType = function(x) return table.anyEqualTo(x, validNormTypes) end
     for normt_i, normType in ipairs(allSpatialNormTypes) do
         
         local masterNormFlagField = 'doSpat' .. normType .. 'Norm'
@@ -287,8 +280,9 @@ fixConvNetParams = function(networkOpts)
             networkOpts[normWidthField]  = table.rep(0,      nConvLayers)
             
         else
-            makeSureFieldIsCorrectLength(normTypeField,  validSpatialNormTypes)
-            makeSureFieldIsCorrectLength(normWidthField)
+            
+            makeSureFieldIsCorrectLength(normTypeField,  isValidSpatialNormType)
+            makeSureFieldIsCorrectLength(normWidthField, isNumeric)
         end
         
         
@@ -461,7 +455,7 @@ end
 
     
 getConvNetStr = function(networkOpts, niceOutputFields)
-    
+    N0 = table.copy(networkOpts)
     local defaultParams = getDefaultConvNetParams(networkOpts.defaultNet)
     
     local defaultPoolStrideIsAuto = true
@@ -492,26 +486,36 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     --local trainOnGPU = networkOpts.trainOnGPU
     
     local convFcn_str = ''
-    if convFunction == 'SpatialConvolutionMap' then -- or convFunction == 'SpatialConvolutionMM' then
-        convFcn_str = ''
-    elseif convFunction == 'SpatialConvolution' then 
-        convFcn_str = 'f'  -- F = 'fully connected'
-    elseif convFunction == 'SpatialConvolutionCUDA' then 
-        convFcn_str = 'c'  -- c = 'CUDA
+    if convFunction == 'SpatialConvolution' then 
+        convFcn_str = 'f'  -- f = 'fully connected'
     elseif convFunction == 'SpatialConvolutionMM' then 
         convFcn_str = 'm'  -- m = 'MM'    
+    elseif convFunction == 'SpatialConvolutionMap' then 
+        convFcn_str = ''
     elseif convFunction == 'SpatialConvolutionCUDNN' then 
-        convFcn_str = 'cd'  -- m = 'MM'    
+        convFcn_str = 'cd'  
+    elseif convFunction == 'SpatialConvolutionCUDA' then 
+        convFcn_str = 'c'  -- c = 'CUDA
     else
         error(string.format('Unknown spatial convolution function : %s', tostring(convFunction)) )
     end
     
     local convPad_str = '';
     local convPad_str_nice = ''
-    if networkOpts.zeroPadForConvolutions then
+    if networkOpts.zeroPadForConvolutions then -- default is : DON'T add zeroPadding before convolutions
         convPad_str = 'P'
         convPad_str_nice = '(P)'
     end
+    
+    local poolPad_str = '';
+    local poolPad_str_nice = ''
+    if not networkOpts.zeroPadForPooling then   -- default is : DO add zeroPadding before pooling
+        poolPad_str = 'NP'
+        poolPad_str_nice = '(NP)'
+    end
+    
+    
+    
     
     local nStates_str = table.concat(networkOpts.nStatesConv, '_') 
     local nStates_str_nice = 'nStates=' .. table.concat(networkOpts.nStatesConv, ',') .. ';' 
@@ -520,8 +524,18 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         nStates_str_nice = nStates_str_nice .. 'FC=' .. table.concat(networkOpts.nStatesFC, ',') .. '; ' 
     end
     
+    local propertyOpts = {}
+    propertyOpts.filtSizes = {prefix = 'fs', prefix_nice='FilterSz',  suffix=convPad_str,  suffix_nice = convPad_str_nice,
+                              str_NA = 'nofilt', str_NA_nice = 'No Filter', is2D = true }
+    propertyOpts.poolSizes = {prefix = 'psz', prefix_nice='PoolSize',  suffix=poolPad_str,  suffix_nice = poolPad_str_nice,
+                              str_NA = 'nopool', str_NA_nice = 'No Pooling', is2D = true }
+    propertyOpts.poolTypes = {prefix = 'pt', prefix_nice='Pnorm',  suffix='',  suffix_nice = '',  str_NA = '', str_NA_nice = '', is2D = false }
+    propertyOpts.poolStrides = {prefix = 'pst', prefix_nice='PoolStrides',  suffix='',  suffix_nice = '',  str_NA = '', str_NA_nice = '', is2D = true }
+    
     -- (1) filtsizes
     
+    
+    --[[
     local filtSizes_str = ''
     local filtSizes_str_nice = '';
     assert(#networkOpts.filtSizes == nConvLayers)
@@ -535,30 +549,66 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         end
     end
     
-    networkPropertyStr = function(fieldName, networkOpts, defaultParams, fldAbbrev, str_NA)
+    --]]
+    networkPropertyStr = function(fieldName)  -- fieldPrefix, fldAbbrev_nice, str_NA, str_NA_nice, is2D
         nConvLayers = (#networkOpts.nStatesConv)
         local networkProp = networkOpts[fieldName]
         local defaultProp = defaultParams[fieldName]
         local property_str = ''
-        assert(#networkProp == nConvLayers)
-        if not isequal_upTo(networkProp, defaultProp, nConvLayers) then        
-            if isequal_upTo(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
-                property_str = '_' .. str_NA
-            elseif (table.nUnique(networkOpts.filtSizes)) == 1 then   --- XXX
-                property_str = '_' .. fldAbbrev .. networkProp[1]
+        local property_str_nice = ''
+        local opt = propertyOpts[fieldName]
+        
+        local extendProp = function(s)
+            if opt.is2D then
+                return s .. 'x' .. s
             else
-                property_str = '_' .. fldAbbrev .. abbrevList(networkProp)
+                return tostring(s)
             end
         end
         
-        return property_str
+        assert(#networkProp == nConvLayers)
+        if not isequal_upTo(networkProp, defaultProp, nConvLayers) then        
+            if isequal_upTo(networkProp, table.rep(0, nConvLayers), nConvLayers) then
+                property_str = '_' .. opt.str_NA
+                property_str_nice =  opt.str_NA_nice .. '. '
+                
+            elseif (table.nUnique(networkProp)) == 1 then   --- XXX
+                property_str = '_' .. opt.prefix .. networkProp[1] .. opt.suffix
+                local prop_str_nice = extendProp(networkProp[1])
+                property_str_nice = opt.prefix_nice .. '=' .. prop_str_nice  .. opt.suffix_nice .. '. '
+                
+            else
+                local list_str, list_str_long
+                if torch.type( networkProp[1] ) == 'string' then
+                    list_str = table.concat( networkProp, '_')
+                    list_str_long = list_str
+                else
+                    list_str = abbrevList(networkProp)
+                    list_str_long = abbrevList(networkProp, '_', -1)
+                end
+                
+                property_str = '_' .. opt.prefix .. list_str .. opt.suffix
+                
+                local tbl_vals = string.split(list_str_long, '_')
+                local tbl_ext_vals = table.apply(extendProp, tbl_vals )
+                local list_nice_ext = table.concat ( tbl_ext_vals, ',')
+                
+                property_str_nice =  opt.prefix_nice .. '=' .. list_nice_ext .. opt.suffix_nice .. '. '
+                
+            end
+        end
+        
+        return property_str,property_str_nice
     end
     
     
+        
+
     
-    filtSizes_str, filtSizes_str_nice = networkPropertyStr('filtSizes', networkOpts, defaultParams, 'fs', 'nofilt')
-    
-    
+    local filtSizes_str, filtSizes_str_nice = networkPropertyStr('filtSizes')
+          
+      
+        --[[
     if niceOutputFields == 'all' or table.contains(niceOutputFields, 'filtSizes') then
         if isequal(networkOpts.filtSizes, table.rep(0, nConvLayers), nConvLayers) then
             filtSizes_str_nice = ' No Filter.'
@@ -566,9 +616,10 @@ getConvNetStr = function(networkOpts, niceOutputFields)
             filtSizes_str_nice = ' FiltSz=' .. abbrevList(networkOpts.filtSizes, ',') .. '.'
         end
     end
+    --]]
 
     -- (2) pooling
-    local skipAllPooling = not networkOpts.doPooling
+    local skipAllPooling =  networkOpts.doPooling == false
     local nLayersWithPooling = 0
     for i = 1,nConvLayers do
         if (networkOpts.poolSizes[i] > 0) and (not skipAllPooling) then 
@@ -578,20 +629,14 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     skipAllPooling = skipAllPooling or (nLayersWithPooling == 0)
                     
     
-    local doPooling_str = ''    
-    local doPooling_str_nice = ''
-    local poolSizes_str = ''
-    local poolSizes_str_nice = ''
-    local poolTypes_str = ''
-    local poolTypes_str_nice = ''
-    local poolStrides_str = ''
-    local poolStrides_str_nice = ''
+    local doPooling_str,      poolSizes_str,      poolTypes_str,      poolStrides_str      = '', '', '', ''
+    local doPooling_str_nice, poolSizes_str_nice, poolTypes_str_nice, poolStrides_str_nice = '', '', '', ''
     
     
     if skipAllPooling then
         doPooling_str = '_nopool'
         if niceOutputFields == 'all' or table.contains(niceOutputFields, 'doPooling') then
-            doPooling_str_nice = ' No Pooling'
+            doPooling_str_nice = ' No Pooling. '
         end
         
     else
@@ -601,65 +646,19 @@ getConvNetStr = function(networkOpts, niceOutputFields)
         if niceOutputFields == 'all' or table.contains(niceOutputFields, 'doPooling') then            
             doPooling_str_nice = ' Pooling: '
         end
-        if nLayersWithPooling < nConvLayers then
-                            
-            for layer_i = 1, nConvLayers do
-                local doPooling_i = (networkOpts.poolSizes[layer_i] == 0) 
-                --doPooling_str = doPooling_str .. iff(doPooling_i, '_pool', '_nopool') 
-                
-                if niceOutputFields == 'all' or table.contains(niceOutputFields, 'doPooling') then    
-                    --doPooling_str_nice = doPooling_str_nice .. iff(doPooling_i, 'Yes', 'No') .. iff(layer_i < nConvLayers, '/', '')
-                end
-            end
-                
-        end
-                    
                 
         -- 2b. Pool Size(s)
-        if not isequal(networkOpts.poolSizes, defaultParams.poolSizes, nConvLayers) then
-            --print('net', networkOpts.poolSizes, 'default', defaultParams.poolSizes)
-            poolSizes_str = '_psz' .. toTruncList(networkOpts.poolSizes, nConvLayers)
-        end
-        if niceOutputFields == 'all' or table.contains(niceOutputFields, 'poolSizes') then
-            poolSizes_str_nice = ' PoolSz=' .. toTruncList(networkOpts.poolSizes, nConvLayers, ',') .. '.'
-        end
+        poolSizes_str, poolSizes_str_nice = networkPropertyStr('poolSizes')
         
-        -- 2b. Pool Type(s) (pnorm)
-        if not isequal(networkOpts.poolTypes, defaultParams.poolTypes, nConvLayers) then
-            --print('filtSizes', networkOpts.filtSizes, filtSizes_default)
-            if table.nUnique(networkOpts.poolTypes) > 1 then
-                poolTypes_str = '_pt' .. toTruncList(networkOpts.poolTypes,nConvLayers)
-            else
-                poolTypes_str = '_pt' .. tostring(networkOpts.poolTypes[1])
-            end
-        end       
-        if niceOutputFields == 'all' or table.contains(niceOutputFields, 'poolTypes') then            
-            if table.nUnique(networkOpts.poolTypes) > 1 then
-                poolTypes_str_nice = ' Pnorm=' .. toTruncList(networkOpts.poolTypes, nConvLayers, ',') .. '.'
-            else
-                poolTypes_str_nice = ' Pnorm=' .. tostring(networkOpts.poolTypes[1]) .. '.'
-            end
-        
-        end
-        
-        -- 2c. PoolStrides(s)
-        
+        -- 2b. Pool Types(s)
+        poolTypes_str, poolTypes_str_nice = networkPropertyStr('poolTypes')
+
+        -- 2c. PoolStrides(s)        
         assert(defaultPoolStrideIsAuto)
-        --[[        
-        local defaultPoolStrides = defaultParams.poolStrides
-        if defaultPoolStrides == 'auto' then
-            defaultPoolStrides = networkOpts.poolSizes -- use poolSize of current network
-        end
-        
-        local currentPoolStrides = networkOpts.poolStrides
-        if currentPoolStrides == 'auto' then
-            currentPoolStrides = networkOpts.poolSizes
-        end
-        --]]
-        if not isequal(networkOpts.poolSizes, networkOpts.poolStrides, nConvLayers) then
-            poolStrides_str = '_pst' .. toTruncList(networkOpts.poolStrides, nConvLayers)
-        end
-        poolStrides_str_nice = ' PoolStrd=' .. toTruncList(networkOpts.poolStrides, nConvLayers, ',') .. '.'
+        if not isequal_upTo(networkOpts.poolSizes, networkOpts.poolStrides, nConvLayers) then
+            poolStrides_str, poolStrides_str_nice = networkPropertyStr('poolStrides')
+        end        
+
         
     end
     
@@ -670,10 +669,15 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     local dropout_str = getDropoutStr(networkOpts)
     
     
-    local convNet_str      = convFcn_str .. nStates_str      .. filtSizes_str      .. convPad_str      .. doPooling_str  ..
-            poolSizes_str      .. poolTypes_str      .. poolStrides_str ..  nLinType_str .. dropout_str .. gpu_str
-    local convNet_str_nice = convFcn_str .. nStates_str_nice .. filtSizes_str_nice .. convPad_str_nice .. doPooling_str_nice ..
-            poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  ..  nLinType_str_nice .. dropout_str .. gpu_str
+    local convNet_str      = convFcn_str .. nStates_str      ..
+            filtSizes_str  .. 
+            doPooling_str  .. poolSizes_str      .. poolTypes_str      .. poolStrides_str ..  
+            nLinType_str .. dropout_str .. gpu_str
+    
+    local convNet_str_nice = convFcn_str .. nStates_str_nice .. 
+            filtSizes_str_nice ..  
+            doPooling_str_nice .. poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  .. 
+            nLinType_str_nice .. dropout_str .. gpu_str
             
     return convNet_str, convNet_str_nice
     

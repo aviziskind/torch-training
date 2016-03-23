@@ -10,7 +10,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     --local redoTrainingIfOld_date = 1444887467 
     local redoTrainingIfOld_date = 1402977793 -- (6/15, late) --  1402928294 --(6/15)      --1393876070 -- os.time()
     local forceContinueTraining = true
-    local forceContinueTrainingIfBefore = 1417727482 -- (12/4)   1401632026 -- =(6/1) --  1399960186 -- 1399958480 --1393878677  -- os.time()
+    local forceContinueTrainingIfBefore = 1417727482 --  (12/4)   1401632026 -- =(6/1) --  1399960186 -- 1399958480 --1393878677  -- os.time()
     local shuffleTrainingSamples = true -- since we're mixing sets with different noise levels, want to be evenly spread out
     local shuffleTrainingSamplesEachEpoch = true
     
@@ -27,6 +27,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local test2Data = trainingOpts.test2Data
     if haveSecondTestData then
         print('>> Have a second test set << ')
+    end
+    
+    if trainingOpts.redoTrainingIfOld_date then
+        redoTrainingIfOld_date = trainingOpts.redoTrainingIfOld_date
     end
     
     local freezeFeatures = trainingOpts.freezeFeatures or false-- copy this value, in case overwritten by loading from file
@@ -47,6 +51,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local trainingClassifier = torch.isClassifierCriterion(torch.typename(criterion))
     trainingOpts.trainingClassifier = trainingClassifier
     
+    local showCost = true
+    local showErr  = trainingClassifier
+    
     --local haveExtraCriterion = model_struct.criterion2
     local origCriterion = model_struct.criterion
     local extraCriterion = model_struct.extraCriterion
@@ -60,13 +67,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         require_cost_minimum = true
     end
     
-    if trainOnGPU then
-        model_struct.model = model_struct.model:cuda()
-        model_struct.criterion = model_struct.criterion:cuda()
-    else
-        --model_struct.model = model_struct.model:float()
-        --model_struct.criterion = model_struct.criterion:float()
-    end
+
     
     local reprocessInputs = trainingOpts.reprocessInputs
     
@@ -187,13 +188,16 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         nEpochsDone      = trainingLogger.nEpochs
         model_struct     = trainingLogger.model_struct
                 
-        prev_train_loss   = trainingLogger:currentLoss()
-        prev_trainErr_pct = trainingLogger:currentTrainErr()
-        prev_testErr_pct = trainingLogger:currentTestErr()
+        local prev_train_loss   = trainingLogger:currentLoss()
+        local prev_trainErr_pct = trainingLogger:currentTrainErr()
+        local prev_testErr_pct = trainingLogger:currentTestErr()
         
         
-        io.write(string.format('   Currently at epoch %d: Cost = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
-                nEpochsDone, prev_train_loss, prev_trainErr_pct, prev_testErr_pct))
+        io.write(string.format('   Currently at epoch %d: Cost = %.4f.', nEpochsDone, prev_train_loss));
+        if showErr then
+            io.write(string.format('TrainErr = %.2f. TestErr = %.1f', prev_trainErr_pct, prev_testErr_pct))
+        end
+        io.write('\n')
         
         continueTraining, trainingAlgorithm, reasonToStopTraining = trainingLogger:continue()
         
@@ -204,6 +208,14 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         logger_open_mode = 'new'
     end
     
+    print('trainOnGPU', trainOnGPU)
+    if trainOnGPU then
+        model_struct.model = model_struct.model:cuda()
+        model_struct.criterion = model_struct.criterion:cuda()
+    else
+        model_struct.model = model_struct.model:float()
+        model_struct.criterion = model_struct.criterion:float()
+    end
     
     if (trainingLogger.filename ~= torchLogFile) then
         io.write(string.format( 'Warning! found different file name for network : \n %s \n. Changing to current name : %s\n', trainingLogger.filename, torchLogFile) )
@@ -471,6 +483,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                     output = output:resize(nOutputs)
                 end
                 local extraLoss = criterion:forward(output, target)
+                
+                
                 --if _idx_ < 10 then
                   --  io.write(string.format('%d : output : %s \n       target: %s\n.             extraLoss: %.4f\n\n', 
                     --            _idx_, tostring_inline(output, '%.3f'), tostring_inline(target, '%.3f'), extraLoss))
@@ -618,8 +632,14 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize, reprocessInputs = reprocessInputs})        
         prev_test_loss = current_test_loss
         
-        io.write(string.format('   Quick check: Train Loss = %.4f, Test Loss = %.4f, TrainErr = %.2f. TestErr = %.1f\n', 
-                    current_train_loss, current_test_loss, curr_trainErr_pct, curr_testErr_pct))
+        io.write(string.format('   Quick check: Train Loss = %.4f, Test Loss = %.4f. ', current_train_loss, current_test_loss))
+            
+        if showErr then
+            io.write(string.format('TrainErr = %.2f. TestErr = %.1f', curr_trainErr_pct, curr_testErr_pct))
+        end
+        io.write('\n')
+            
+            
         prev_train_loss   = current_train_loss
         prev_test_loss    = current_test_loss
         prev_trainErr_pct = curr_trainErr_pct
@@ -630,7 +650,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     while continueTraining do
             
-        io.write(string.format('Starting Epoch %d with %s: ', nEpochsDone+1, trainingAlgorithm))
+        cprintf.Green('Starting Epoch %d with %s: ', nEpochsDone+1, trainingAlgorithm)
         io.flush()
         
         local startTime = os.time()
@@ -693,6 +713,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             prev_trainErr_pct = curr_trainErr_pct
             
             if haveTestData then
+                cprintf.blue('     > Evaluating performance on testing set      : ')
+
                 curr_testErr_pct, _, current_test_loss, t_elapsed_sec = 
                     testModel(model_struct_forTest, testData_use, {getLoss = true, verbose = showTrainTestTime, 
                                 test_indiv_pos = trainOnIndividualPositions, batchSize = batchSize, reprocessInputs = reprocessInputs})        
@@ -712,10 +734,12 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         if extraCriterion then
             model_struct_forTest.criterion = extraCriterion
             
+            cprintf.blue('     > Evaluating extra Criterion on training set : ')
             _, _, current_train_loss_extraCrit = testModel(model_struct_forTest, trainData_use, 
                 {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, 
                         batchSize = batchSize, reprocessInputs = reprocessInputs})        
 
+            cprintf.blue('     > Evaluating extra Criterion on testing set  : ')
             _, _, current_test_loss_extraCrit =  testModel(model_struct_forTest, testData_use, 
                 {getLoss = true, verbose = showTrainTestTime, test_indiv_pos = trainOnIndividualPositions, 
                     batchSize = batchSize, reprocessInputs = reprocessInputs})        
@@ -750,14 +774,23 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         
         local checkErrAfterEachEpoch = false
         if checkErrAfterEachEpoch then
-            local curr_trainErr_pct_after, _, current_train_loss_after = 
-                testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize, reprocessInputs = reprocessInputs})
+            cprintf.blue('     > Evaluating performance on Training set      : ')
 
+            local curr_trainErr_pct_after, _, current_train_loss_after = 
+                testModel(model_struct_forTest, trainData_use, {getLoss = true, batchSize = batchSize, 
+                                                                reprocessInputs = reprocessInputs})
+
+            cprintf.blue('     > Evaluating performance on Testing set       : ')
             local curr_testErr_pct_after, _, current_test_loss_after = 
-                testModel(model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize, reprocessInputs = reprocessInputs})
+                testModel(model_struct_forTest, testData_use, {getLoss = true, batchSize = batchSize, 
+                                                               reprocessInputs = reprocessInputs})
                 
-            io.write(string.format('   Quick check: TrainLoss = %.4f. TestLoss = %.4f. TrainErr = %.2f. TestErr = %.1f\n', 
-                current_train_loss_after, current_test_loss_after, curr_trainErr_pct_after, curr_testErr_pct_after))        
+            io.write(string.format('   Quick check: TrainLoss = %.4f. TestLoss = %.4f. ', 
+                                    current_train_loss_after, current_test_loss_after))        
+            if showErr then
+                io.write(string.format('TrainErr = %.2f. TestErr = %.1f', curr_trainErr_pct_after, curr_testErr_pct_after))        
+            end
+            io.write('\n')
         end
         
 
@@ -793,9 +826,15 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         model_struct.trainingDate = os.time()
 
         local timeForThisEpoch_tot = os.time() - startTime
-        io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%). TrainErr = %.2f (%+.2f%%). TestErr = %.1f [took %s]\n', 
-                nEpochsDone, current_train_loss, train_loss_change_pct, current_test_loss, test_loss_change_pct, 
-                    curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, sec2hms(timeForThisEpoch_tot)))
+        io.write(string.format('   after epoch %d: TrainCost = %.4f (%+.2f%%). TestCost = %.4f (%+.2f%%)', 
+                nEpochsDone, current_train_loss, train_loss_change_pct, current_test_loss, test_loss_change_pct ))
+
+        if showErr then
+            io.write(string.format('TrainErr = %.2f (%+.2f%%). TestErr = %.1f', 
+                        curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct ))
+        end
+        io.write(string.format(' [took %s]\n', sec2hms(timeForThisEpoch_tot)))
+
 
         if haveSecondTestData then
             io.write(string.format('    [Second test set: Cost = %.4f (%+.2f%%). Test : %.4f]\n', 
@@ -806,6 +845,16 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
 
         if extraCriterion then
             io.write(string.format('    [Extra Criterion: Train: %.4f. Test : %.4f]\n', current_train_loss_extraCrit, current_test_loss_extraCrit))
+            
+           convertCostToPixels = true
+            if convertCostToPixels then
+                local imageSize = {trainData_use.inputMatrix:size(3), trainData_use.inputMatrix:size(4)}
+                local train_meanDist_image, train_meanDist_pix = cost2dist(current_train_loss_extraCrit, imageSize)
+                local test_meanDist_image,  test_meanDist_pix  = cost2dist(current_test_loss_extraCrit, imageSize)
+                cprintf.Red('      Train Error in pixels : %.4f of image / %.2f pixels\n', train_meanDist_image, train_meanDist_pix)
+                cprintf.Red('      Test  Error in pixels : %.4f of image / %.2f pixels\n', test_meanDist_image, test_meanDist_pix)
+            end
+            
         end
 
         io.write('\n')
@@ -1130,6 +1179,14 @@ selectInputBatch = function(x, x_indices)
     return y
     
 end
+
+
+cost2dist = function(cost, imageSize)
+    local meanDist_image = math.sqrt(cost/2)
+    local meanDist_pix   = meanDist_image * (  (imageSize[1] + imageSize[2])/2  )
+    return meanDist_image, meanDist_pix
+end
+
 
 
 

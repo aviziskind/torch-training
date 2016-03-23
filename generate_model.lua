@@ -166,7 +166,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
             end
                 
             if fcPs then    -- dropoutPs = {0.5, -0.5} : dropout in all convolutional layers with p = 0.5
-                fullyConnectedDropoutPs = table.apply(fcPs, function(x) return -x; end)  -- extend
+                local negative = function(x) return -x; end
+                fullyConnectedDropoutPs = table.apply(negative,   fcPs)  -- extend
                 if #fcPs == nFCLayers then
                     fullyConnectedDropoutPs = fcPs  
                 else
@@ -252,7 +253,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     SpatConvModule = nn.SpatialConvolutionMM(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH, dW, dH,  nConvPaddingW, nConvPaddingH)
                 
                 elseif convFunction == 'SpatialConvolutionCUDNN' then
-                    SpatConvModule = cudnn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH,  dW, dH,  nConvPaddingW, nConvPaddingH)
+                    SpatConvModule = cudnn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH, dW, dH, nConvPaddingW, nConvPaddingH)
                     
                 else
                     error('Unknown spatial convolution function : ' .. tostring(convFunction))
@@ -1021,9 +1022,6 @@ copyConvolutionalWeights = function (model1, mod1_idx, model2, mod2_idx)
     i2 = mod2_idx
     error('!')
 
-
-
-
 end
 
 
@@ -1163,6 +1161,105 @@ splitModelFromLayer = function(model_struct, splitLayer, splitAfterFlag)
 
 
 end
+
+
+expandLinearLayersToConvolutionalLayers = function(model, sampleInput)
+    local newModel = nn.Sequential()
+    if not model.output then
+        model:forward(sampleInput)
+    end
+      
+    local origModel = getStreamlinedModel(model)
+   
+    local prevModule
+    local addCurModule
+    local SpatialConvolution
+    
+    for i, module_i in ipairs(origModel.modules) do
+    
+        local module_i_name = torch.typename(module_i)
+        local module_i_name_full = tostring(module_i)
+        local module_to_add
+        local action_str
+        
+        Module_i = module_i
+        PrevModule = prevModule
+        -- if is a linear layer, expand
+        if module_i_name == 'nn.Linear' then
+            curFeaturesIn, curFeaturesOut = module_i.weight:size(2), module_i.weight:size(1)
+            assert(prevModule)
+            
+            prevOutputSize = prevModule.output:size()
+            local prevFeaturesOut, prevOutH, prevOutW
+            --prevFeaturesOut = prevOutputSize[1]
+            if (#prevOutputSize == 3) then -- nfeatures x h x w
+                --assert(#prevOutputSize == 3)  -- 
+                prevFeaturesOut, prevOutH, prevOutW = prevOutputSize[1], prevOutputSize[2], prevOutputSize[3]
+            elseif (#prevOutputSize == 1) then 
+                prevFeaturesOut, prevOutH, prevOutW = prevOutputSize[1], 1, 1 
+            end
+            assert(prevFeaturesOut * prevOutH * prevOutW == curFeaturesIn)
+
+           --partFilter:add( SpatialConvolution (fcState[1],fcState[2],fcIn[1],fcIn[2]))
+            local newConvModule = SpatialConvolution(prevFeaturesOut, curFeaturesOut, prevOutH, prevOutW)
+            action_str = string.format('Converted to Convolutional layer : %d -> %d [%dx%d]', prevFeaturesOut, curFeaturesOut, prevOutH, prevOutW)
+                           
+            NewConvModule = newConvModule
+            Module_i = module_i
+            newConvModule.weight[{}] = module_i.weight:float()
+            newConvModule.bias[{}]   = module_i.bias:float()
+                           
+            local outputSize_str = tostring_inline( module_i.output:size() )
+            newModel:add(newConvModule)
+            cprintf.Green('Module %d : %s : outputSize=%s  -> %s\n', i, module_i_name, outputSize_str, action_str)
+                           
+        elseif module_i_name == 'nn.Reshape' then
+            
+            cprintf.red('Module %d : %s -> [Skipped]\n', i, module_i_name_full)
+        elseif module_i_name == 'nn.LogSoftMax' then
+            
+            cprintf.red('Module %d : %s -> [Skipped]\n', i, module_i_name_full)
+        else
+            if (string.find(module_i_name, 'Convolution')) then
+                local conv
+                if     module_i_name == 'nn.SpatialConvolution' then
+                    conv = nn.SpatialConvolution
+                elseif module_i_name == 'nn.SpatialConvolutionMM' then
+                    conv = nn.SpatialConvolutionMM
+                elseif module_i_name == 'cudnn.SpatialConvolution' then
+                    conv = cudnn.SpatialConvolution
+                else
+                    error('Unknown convolution module')
+                end
+                if SpatialConvolution then
+                    if SpatialConvolution ~= conv then
+                        error('Multiple kinds of spatial convolution layers in this network')
+                    end
+                else 
+                    SpatialConvolution = conv
+                end
+                cprintf.yellow('[Conv]');
+            end
+            
+            local outputSize_str = tostring_inline( module_i.output:size() )
+            
+            newModel:add( module_i )
+            cprintf.blue('Module %d : %s : outputSize=%s -> [Copied]\n', i, module_i_name, outputSize_str)
+                
+        end
+        
+    
+        if module_i_name ~= 'nn.Reshape' then
+            prevModule = module_i
+        end
+    end
+
+
+    return newModel
+end
+
+
+
 
 
 visualizeHiddenUnits = function(model)

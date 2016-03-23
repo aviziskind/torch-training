@@ -24,7 +24,16 @@ getFilterStr = function(filt, wForWhite)
         end
         
     elseif filt.filterType == 'band' then
-        filtStr = string.format('Nband%.0f', filt.cycPerLet_centFreq*10)
+        
+        if filt.cycPerLet_centFreq then                
+            filtStr = string.format('Nband%.0f',     filt.cycPerLet_centFreq*10)
+        elseif filt.pixPerCycle_centFreq then
+            filtStr = string.format('Nband%.0fppc', filt.pixPerCycle_centFreq)               
+        elseif filt.cycPerPix_centFreq then                
+            filtStr = string.format('Nband%.0fcpp', filt.cycPerPix_centFreq)
+        else
+            error('No center frequency field')
+        end
         
     elseif filt.filterType == 'hi' then
         filtStr = string.format('Nhi%.0f', filt.cycPerLet_cutOffFreq*10)
