@@ -1,7 +1,7 @@
 require 'image'  -- for normalization kernels
 
 generateModel = function(inputStats, networkOpts, letterOpts)
-    
+
     --torch.manualSeed(123)
     local nInputs = inputStats.nInputs
     local nInputPlanes = inputStats.nInputPlanes or 1
@@ -39,7 +39,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
     assert(nLinType)
 
     --input layer 
-    
+
     if networkOpts.netType == 'MLP'  then
 
         local nHiddenUnitsEachLayer = networkOpts.nHiddenUnits
@@ -55,7 +55,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
         for layer_i,nUnitsInThisLayer in ipairs(nHiddenUnitsEachLayer) do
             feat_extractor:add(  nn.Linear(nUnitsInLastLayer, nUnitsInThisLayer) )
-            
+
             local nlin = getNonlinearity(nLinType) 
             feat_extractor:add(  nlin )
 
@@ -64,9 +64,11 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
         --output layer
         classifier:add(  nn.Linear(nUnitsInLastLayer, nOutputs) )
-
+        print('finalLayer', finalLayer)
         if finalLayer == 'LogSoftMax' then
             classifier:add(  nn.LogSoftMax() )
+        elseif finalLayer == 'Sigmoid' then
+            classifier:add(  nn.Sigmoid() )
         elseif finalLayer == '' then
             -- do nothing 
         else
@@ -112,26 +114,21 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         --local useConnectionTable = useConnectionTable_default and not trainOnGPU
         --params.enforceStridePoolSizeEqual = trainOnGPU
         local n = networkOpts
-        
+
         local convFunction,   fanin,   filtSizes,   doPooling,   poolSizes,   poolTypes,   poolStrides,   trainOnGPU = 
-            n.convFunction, n.fanin, n.filtSizes, n.doPooling, n.poolSizes, n.poolTypes, n.poolStrides, n.trainOnGPU
-        
+        n.convFunction, n.fanin, n.filtSizes, n.doPooling, n.poolSizes, n.poolTypes, n.poolStrides, n.trainOnGPU
+
         local doSpatSubtrNorm,   spatSubtrNormType,   spatSubtrNormWidth,   doSpatDivNorm,   spatDivNormType,   spatDivNormWidth = 
-            n.doSpatSubtrNorm, n.spatSubtrNormType, n.spatSubtrNormWidth, n.doSpatDivNorm, n.spatDivNormType, n.spatDivNormWidth
-           
+        n.doSpatSubtrNorm, n.spatSubtrNormType, n.spatSubtrNormWidth, n.doSpatDivNorm, n.spatDivNormType, n.spatDivNormWidth
+
 
         local zeroPadForPooling = n.zeroPadForPooling or true
         local zeroPadForConvolutions = n.zeroPadForConvolutions or false
-        local splitInTwo = function(x)
-            local a = math.ceil(x/2)
-            local b = x-a 
-            return a, b
-        end
 
         local convPs, fcPs
         local convLayerDropoutPs = table.rep(0, nConvLayers)
         local fullyConnectedDropoutPs = table.rep(0, nFCLayers)
-        
+
         local dropoutPs = n.dropoutPs
         local useSpatialDropout = n.spatialDropout
         if dropoutPs then
@@ -141,8 +138,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 elseif dropoutPs < 0 then    -- dropoutPs = -0.5 : dropout in all fully connected layers with p = 0.5
                     fcPs = {-dropoutPs} --fullyConnectedDropoutPs = table.rep(-dropoutPs, nFCLayers)
                 end
-                    
-                    
+
+
             elseif type(dropoutPs) == 'table' then
                 local idx_firstPos = table.find(dropoutPs, function (x) return x>0; end)
                 local idx_firstNeg = table.find(dropoutPs, function (x) return x<0; end)
@@ -157,14 +154,14 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     fcPs = dropoutPs
                 end
             end
-                
+
             if convPs then
                 assert(#convPs <= nConvLayers)
                 for j = 1,#convPs do
                     convLayerDropoutPs[nConvLayers - #convPs + j] =  convPs[j]
                 end
             end
-                
+
             if fcPs then    -- dropoutPs = {0.5, -0.5} : dropout in all convolutional layers with p = 0.5
                 local negative = function(x) return -x; end
                 fullyConnectedDropoutPs = table.apply(negative,   fcPs)  -- extend
@@ -174,12 +171,12 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     assert(#fcPs == 1)
                     fullyConnectedDropoutPs = table.rep(-fcPs[1], nFCLayers)
                 end
-                
+
             end
             --print(convPs)
             --print('convLayerDropoutPs', convLayerDropoutPs)
             --print('fullyConnectedDropoutPs', fullyConnectedDropoutPs)
-                            
+
         end
 
         local doDropoutInConvLayers = #convLayerDropoutPs > 0
@@ -246,21 +243,21 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 elseif convFunction == 'SpatialConvolution' then
                     SpatConvModule = nn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH,  dW, dH,  nConvPaddingW, nConvPaddingH)
 
-                --elseif convFunction == 'SpatialConvolutionCUDA' then   (deprecated)
-                  --  SpatConvModule = nn.SpatialConvolutionCUDA(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)
+                    --elseif convFunction == 'SpatialConvolutionCUDA' then   (deprecated)
+                    --  SpatConvModule = nn.SpatialConvolutionCUDA(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH)
 
                 elseif convFunction == 'SpatialConvolutionMM' then
                     SpatConvModule = nn.SpatialConvolutionMM(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH, dW, dH,  nConvPaddingW, nConvPaddingH)
-                
+
                 elseif convFunction == 'SpatialConvolutionCUDNN' then
                     SpatConvModule = cudnn.SpatialConvolution(nStatesConv[layer_i-1], nStatesConv[layer_i], kW, kH, dW, dH, nConvPaddingW, nConvPaddingH)
-                    
+
                 else
                     error('Unknown spatial convolution function : ' .. tostring(convFunction))
                 end
                 feat_extractor:add(SpatConvModule)
 
-                
+
                 nOut_conv_w[layer_i] = nOut_pool_w[layer_i-1] - filtSizes[layer_i] + 1  + nConvPaddingW*2
                 nOut_conv_h[layer_i] = nOut_pool_h[layer_i-1] - filtSizes[layer_i] + 1  + nConvPaddingH*2
 
@@ -333,16 +330,16 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                         local nPad_h = nCovered_pool_h_ext - nOut_conv_h[layer_i];
                         local nPad_w = nCovered_pool_w_ext - nOut_conv_w[layer_i];
 
-                        local padTop,  padBottom = splitInTwo(nPad_w)
-                        local padLeft, padRight  = splitInTwo(nPad_h)
+                        local padTop,  padBottom = math.splitInTwo(nPad_w)
+                        local padLeft, padRight  = math.splitInTwo(nPad_h)
                         --local padTop,  padBottom = nPad_h, 0
                         --local padLeft, padRight  = nPad_w, 0
                         local zeroPaddingModule = nn.SpatialZeroPadding(padLeft, padRight, padTop, padBottom)
                         --print(string.format('   output of layer %d : %dx%d\n', layer_i, nOut_pool_h[layer_i], nOut_pool_w[layer_i]))
                         --print(string.format('  >> Warning : Pooling in layer %d would drop %d from the height and %d from the width.',
-                          --      layer_i, dropped_pixels_h, dropped_pixels_w))
+                        --      layer_i, dropped_pixels_h, dropped_pixels_w))
                         --print(string.format('  >> So we are adding %d x %d of zero padding [L%d, R%d, T%d, B%d] before adding the pooling module',
-                          --      nPad_h, nPad_w,padLeft, padRight, padTop, padBottom))
+                        --      nPad_h, nPad_w,padLeft, padRight, padTop, padBottom))
 
                         feat_extractor:add(zeroPaddingModule)
 
@@ -365,8 +362,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 nOut_pool_h[layer_i] = nOut_conv_h[layer_i]
                 nOut_pool_w[layer_i] = nOut_conv_w[layer_i]            
             end
-            
-            
+
+
             if doDropoutInConvLayers and (convLayerDropoutPs[layer_i] > 0) then  --  <== is this (after pooling) where to put it?
                 if useSpatialDropout then
                     feat_extractor:add(  nn.SpatialDropout(   convLayerDropoutPs[layer_i] ) )                
@@ -374,13 +371,13 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     feat_extractor:add(  nn.Dropout(   convLayerDropoutPs[layer_i] ) )                
                 end
             end
-             
+
             local doSpatSubtrNorm_thisLayer = doSpatSubtrNorm and string.lower(spatSubtrNormType[layer_i]) ~= 'none'
             if doSpatSubtrNorm_thisLayer then
                 local norm_kernel = getNormKernel(spatSubtrNormType[layer_i], spatSubtrNormWidth[layer_i])
                 feat_extractor:add( nn.SpatialSubtractiveNormalization(nStatesConv[layer_i], norm_kernel ) )
             end
-            
+
             local doSpatDivNorm_thisLayer   = doSpatDivNorm  and string.lower(spatDivNormType[layer_i]) ~= 'none' 
             if doSpatDivNorm_thisLayer then
                 local norm_kernel = getNormKernel(spatDivNormType[layer_i], spatDivNormWidth[layer_i])
@@ -393,7 +390,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         NOut_pool_h = nOut_pool_h
         NOut_pool_w = nOut_pool_w
         NStatesConv = nStatesConv
-        
+
         if useCUDAmodules then
             feat_extractor:add(nn.Transpose({4,1},{4,2},{4,3}))        
         end
@@ -425,14 +422,14 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         -- fully-connected layers (if any)
         if nFCLayers > 0 then
             for layer_i,nUnitsInThisLayer in ipairs(nStatesFC) do
-                
+
                 feat_extractor:add(  nn.Linear(nUnitsInLastLayer, nUnitsInThisLayer) )
-                
+
                 local nlin = getNonlinearity(nLinType) 
                 feat_extractor:add(  nlin )
 
                 nUnitsInLastLayer = nUnitsInThisLayer
-                
+
                 if doDropoutInFullyConnectedLayers and (fullyConnectedDropoutPs[layer_i] > 0) then --- moved  dropout to be AFTER each fully connected layer
                     feat_extractor:add(  nn.Dropout(   fullyConnectedDropoutPs[layer_i] ) )
                 end
@@ -445,7 +442,14 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
         if finalLayer == 'LogSoftMax' then
             classifier:add(  nn.LogSoftMax() )
+        elseif finalLayer == 'Sigmoid' then
+            classifier:add(  nn.Sigmoid() )
+        elseif finalLayer == '' then
+            -- do nothing 
+        else
+            error('Unknown final layer type : ' .. finalLayer )
         end
+
 
         if nPositions > 1 then
             local indiv_pos_classifier = nn.Linear(nUnitsInLastLayer, nOutputs * nPositions);
@@ -498,9 +502,10 @@ generateModel = function(inputStats, networkOpts, letterOpts)
     model_struct.model = model   
     --print('model_struct.model')
     --print(model_struct.model)
-    model_struct.model_combined_pos = model   
 
     if nPositions > 1 then
+        model_struct.model_combined_pos = model   
+
         model_indiv_pos = nn.Sequential()
         model_indiv_pos:add(feat_extractor)
         model_indiv_pos:add(classifier_indiv_pos)
@@ -697,19 +702,19 @@ end
 
 
 getDefaultConvNetParams = function(defaultNetworkName)
-    
+
     --assert(defaultNetworkName)
     defaultNetworkName = defaultNetworkName or 'LeNet'
-        
+
     local params = {}
     if defaultNetworkName == 'LeNet' then
-    
+
         params.netType = 'ConvNet'
         params.defaultNet = defaultNetworkName
         params.nStatesConv = {6,16}
         params.nStatesFC = {120}    
         params.convFunction = 'SpatialConvolutionMap'
-        
+
         params.fanin = {1,4,16}
         params.filtSizes = {5,4}
 
@@ -719,16 +724,16 @@ getDefaultConvNetParams = function(defaultNetworkName)
         params.poolStrides = 'auto' --{2,2}
 
         params.doSpatSubtrNorm = false
-    
-    
+
+
     elseif defaultNetworkName == 'FHWA_default' then
-    
+
         params.netType = 'ConvNet'
         params.defaultNet = defaultNetworkName
         params.nStatesConv = {128,256,512,512}
         params.nStatesFC = {1024}    
         params.convFunction = 'SpatialConvolutionMap'
-        
+
         params.fanin = {1,4,4,4}
         params.filtSizes = {9,9,9,5}
 
@@ -740,13 +745,13 @@ getDefaultConvNetParams = function(defaultNetworkName)
         params.doSpatSubtrNorm = true
         params.spatSubtrNormType = 'gauss'
         params.spatSubtrNormWidth = 7
-        
+
         params.doSpatDivNorm = false    
 
     end
-    
+
     return params
-    
+
 end
 
 --[[
@@ -776,7 +781,7 @@ getStreamlinedModel = function(model)
     local full_model = nn.Sequential()
     if not model.modules then
         full_model:add(model)
-        return
+        return full_model
     end
 
     local nModules = #model.modules
@@ -1000,7 +1005,7 @@ end
 
 
 firstConvolutionalWeightValue = function(model_struct1)
-
+    
     full_model1 = getStreamlinedModel(model_struct1.model)    
 
     local net1_idx = getModuleIndex(full_model1, 'Conv1')
@@ -1010,6 +1015,89 @@ firstConvolutionalWeightValue = function(model_struct1)
         --return val1, val2        
         return val1
     end
+
+end
+
+
+firstWeightVal = function(mod)
+    local weight
+    if torch.isTensor(mod) then
+        weight = mod
+    else
+        weight = mod.weight
+    end
+        
+    local weightVec = weight:reshape( weight:numel() )
+    local firstVal = weightVec[1]
+    return firstVal
+
+end
+
+firstLinearWeight = function(model_struct1)
+    
+    local firstLin = findFirstModuleOfType(model_struct1, 'linear')
+    local linWeight = firstLin.weight
+    local weightVec = linWeight:reshape( linWeight:numel() )
+    local firstVal = weightVec[1]
+    return firstVal
+
+end
+
+
+
+findModuleOfType = function(model, module_type, mod_idx, verbose)
+    
+    local mod_return
+    local done = false
+    local count = 1
+    mod_idx = mod_idx or 1
+    local findFromLast = mod_idx < 0
+    local nFound = 0
+    local allFoundMods = {}
+    
+    findMod = function(container)
+
+        for mi, mod in ipairs(container.modules) do
+            --printf('(#%d): %s\n', count, torch.typename(mod))
+             
+            count = count + 1
+            if not done then
+                if string.find(string.lower(torch.typename(mod)), string.lower(module_type)) then
+                    nFound = nFound + 1
+                    if verbose then
+                        printf('Found this module (#%d): %s\n', count, torch.typename(mod))
+                    end
+                    if nFound == mod_idx then
+                        if verbose then
+                            printf('Done!\n')
+                        end
+                        done = true
+                        mod_return = mod
+                    end
+                    if findFromLast then
+                        allFoundMods[nFound] = mod
+                    end
+                    if done then
+                        break;
+                    end
+                end
+            end
+
+            if not done and mod.modules then
+                --printf('Recursing for %s\n', torch.typename(mod))
+                findMod(mod)
+            end
+
+        end
+    end
+
+
+    findMod(model)
+    if findFromLast then
+        mod_return = allFoundMods[#allFoundMods + 1 + mod_idx]
+    end
+        
+    return mod_return
 
 end
 
@@ -1024,6 +1112,12 @@ copyConvolutionalWeights = function (model1, mod1_idx, model2, mod2_idx)
 
 end
 
+copyWeightsAndBiases = function(mod1, mod2)
+   
+   mod2.weight[{}] = mod1.weight
+   mod2.bias[{}]   = mod1.bias
+    
+end
 
 
 resizeConvolutionalOutputLayers = function(model_struct, retrainImageSize)
@@ -1087,7 +1181,7 @@ end
 splitModelFromLayer = function(model_struct, splitLayer, splitAfterFlag) 
     -- default is to split just BEFORE the specified layer
     -- add a third argument as a flag to split just AFTER that layer
-    
+
     local full_model = getStreamlinedModel(model_struct.model)
     local addCopyUnitsForGPUmodel = false
     --local modelSequence = getModelSequence(model_struct.model)
@@ -1151,7 +1245,7 @@ splitModelFromLayer = function(model_struct, splitLayer, splitAfterFlag)
         end
 
         if layer_i > 1 and (layer_i ~= splitLayer) and 
-            ( string.find(torch.typename(curModule), 'SpatialConv') or string.find(torch.typename(curModule), 'Reshape')) then
+        ( string.find(torch.typename(curModule), 'SpatialConv') or string.find(torch.typename(curModule), 'Reshape')) then
             io.write('\n    ')
         end
         io.write(string.format('%s; ', torch.typename(curModule) ))
@@ -1167,32 +1261,215 @@ splitModelFromLayer = function(model_struct, splitLayer, splitAfterFlag)
 end
 
 
-expandLinearLayersToConvolutionalLayers = function(model, sampleInput)
+convertToTableModelWithUpsampling = function(model, scales, opt)
+    opt = opt or {}
+    --verbose = opt.verbose or false
+    if verbose then
+        cprintf.cyan(' == Converting model with parallel to Parallel Table model, with upsampling\n ===')
+    end
+    --expandLinearLayersToConvolutionalLayers = function(model, sampleInput)
+
+    MM = model
+
+    local onGPU = torch.typename(model.output) == 'torch.CudaTensor'
+    if verbose then
+        printf(' model on GPU = %s\n', onGPU)
+    end
+
+    assert(#model.modules == 2)
+    local parModule = model.modules[1]; assert(torch.typename(parModule) == 'nn.Parallel')
+    local seqModule = model.modules[2]; assert(torch.typename(seqModule) == 'nn.Sequential')
+
+    -- convert nn.Parallel --> nn.ParallelTable()
+    assert(#parModule.modules == #scales)
     local newModel = nn.Sequential()
-    if not model.output then
+
+    local parTableModule = nn.ParallelTable()
+    ParOutputSize = {}
+    local parOutputSize
+    for i, scale in ipairs(scales) do
+        local mod_i = parModule.modules[i]
+
+        if opt.sampleInput_tbl then
+            mod_i:forward(opt.sampleInput_tbl[i])
+        end
+        ParOutputSize[i] = mod_i.output:size()
+        if i == 1 then
+            assert(scale == 1)
+        end
+        -- add upscale module
+        local mod_i_toAdd
+        if scale == 1 then
+            mod_i_toAdd = mod_i
+        else
+            mod_i_toAdd = nn.Sequential()
+            mod_i_toAdd:add(mod_i)
+            mod_i_toAdd:add(  nn.SpatialUpSamplingNearest(scale) )
+        end
+        parTableModule:add(mod_i_toAdd)
+
+    end
+
+    newModel:add(parTableModule)
+    newModel:add( nn.JoinTable(1) )
+    newModel:add(seqModule)
+
+    if onGPU then
+        newModel:cuda()
+    else
+        newModel:float()        
+    end
+    
+    printf('\n');
+    return newModel
+end
+
+
+addPaddingToParallelTableModel = function(tableModel, scales, inputSize_pix)
+    -- Adds padding to the different branches of a model that has a ParallelTable as its first module,
+    -- so that an input of size inputSize_pix can successfully be forwarded through the model.
+    -- original tableModel is unchanged. Returns a new model that uses a new sequential container for
+    -- each branch that needs to be padded, that includes the original sequential, plus a padding module
+
+    cprintf.cyan('Adding Padding to model, so that it can handles inputs of size %s, at scales %s\n', 
+        tostring_inline(inputSize_pix), tostring_inline(scales) )
+
+    local nScales = #scales
+    local parTableModule = tableModel.modules[1]
+    assert( torch.typename(parTableModule) == 'nn.ParallelTable')
+    assert(#parTableModule.modules == nScales)
+
+    local parTableModule_padded = nn.ParallelTable()
+
+
+    sampleInput = torch.ones(1, inputSize_pix[1], inputSize_pix[2])
+    if useGPU then
+        sampleInput = sampleInput:cuda()
+    end
+    sampleInput_tbl = replicateImageAtScales(sampleInput, scales)
+
+
+    local parOutputHeights = torch.Tensor(nScales)
+    local parOutputWidths = torch.Tensor(nScales)
+    local isPadded = {}
+    local h_max, w_max = 0,0
+    for i,scale in ipairs(scales) do
+        local mod_i = parTableModule.modules[i]
+        assert(torch.typename(mod_i) == 'nn.Sequential')
+
+        isPadded[i] = #mod_i.modules == 2 
+                    and torch.typename(mod_i.modules[1]) == 'nn.Sequential' 
+                    and torch.typename(mod_i.modules[2]) == 'nn.SpatialZeroPadding'
+                    
+        if isPadded[i] then
+            mod_i = mod_i.modules[1]
+        end
+
+        output_i = mod_i:forward(sampleInput_tbl[i])
+        assert(#output_i:size() == 3)
+        parOutputHeights[i] = output_i:size(2)
+        parOutputWidths[i] = output_i:size(3)
+    end
+
+    local maxHeight = parOutputHeights:max()
+    local maxWidth  = parOutputWidths:max()
+
+    for i,scale in ipairs(scales) do
+
+        local pad_tb = maxHeight - parOutputHeights[i]
+        local pad_lr = maxWidth  - parOutputWidths[i]
+
+        local mod_i = parTableModule.modules[i]
+        if isPadded[i] then
+            mod_i = mod_i.modules[1] -- remove previous padding module
+        end
+        
+        if pad_tb > 0 or pad_lr > 0 then
+
+            local pad_t, pad_b = math.splitInTwo(pad_tb)
+            local pad_l, pad_r = math.splitInTwo(pad_lr)
+
+            local paddingModule = nn.SpatialZeroPadding(pad_l, pad_r, pad_t, pad_b)
+
+            local seq_with_new_padding = nn.Sequential()
+            seq_with_new_padding:add(mod_i)
+            seq_with_new_padding:add( paddingModule )
+
+            parTableModule_padded:add( seq_with_new_padding )
+
+            cprintf.red   ('Parallel Module %d (scale=%d) : output is %d x %d <  max (%d x %d): adding padding [l=%d,r=%d,t=%d,b=%d]\n',
+                i,scale,   parOutputHeights[i], parOutputWidths[i], maxHeight, maxWidth, pad_l, pad_r, pad_t, pad_b)
+
+        else
+            parTableModule_padded:add( mod_i )
+            cprintf.yellow('Parallel Module %d (scale=%d) : output is %d x %d == max (%d x %d)\n', 
+                i,scale,   parOutputHeights[i], parOutputWidths[i], maxHeight, maxWidth )
+        end
+
+    end
+
+
+    --sampleInput_tbl
+
+
+    local tableModel_padded = nn.Sequential()
+    tableModel_padded:add(parTableModule_padded)
+
+    for i = 2,#tableModel.modules do
+        tableModel_padded:add(tableModel.modules[i])
+    end
+    
+    printf('\n')
+
+    return tableModel_padded
+
+    --error('!')
+
+
+
+end
+
+
+expandLinearLayersToConvolutionalLayers = function(model, sampleInput, opt)
+    --local verbose = opt.verbose
+    if verbose then
+        cprintf.cyan('Expanding Linear layers to Convolutional Layers:\n')
+    end
+
+    local newModel = nn.Sequential()
+    if not model.output or model.output:nElement()==0  then
         model:forward(sampleInput)
     end
-      
+    opt = opt or {}
+
+    local onGPU = torch.typename(model.output) == 'torch.CudaTensor'
+    if verbose then
+        printf(' [model on GPU = %s]\n', onGPU)    
+    end
+
     local origModel = getStreamlinedModel(model)
-   
+
     local prevModule
     local addCurModule
-    local SpatialConvolution
-    
+    local SpatialConvolution = opt.SpatialConvolution
+
     for i, module_i in ipairs(origModel.modules) do
-    
+
         local module_i_name = torch.typename(module_i)
         local module_i_name_full = tostring(module_i)
         local module_to_add
         local action_str
-        
+
         Module_i = module_i
         PrevModule = prevModule
         -- if is a linear layer, expand
+        if verbose then
+            cprintf.blue('    Module %2d : ', i)
+        end
         if module_i_name == 'nn.Linear' then
             curFeaturesIn, curFeaturesOut = module_i.weight:size(2), module_i.weight:size(1)
             assert(prevModule)
-            
+
             prevOutputSize = prevModule.output:size()
             local prevFeaturesOut, prevOutH, prevOutW
             --prevFeaturesOut = prevOutputSize[1]
@@ -1204,37 +1481,36 @@ expandLinearLayersToConvolutionalLayers = function(model, sampleInput)
             end
             assert(prevFeaturesOut * prevOutH * prevOutW == curFeaturesIn)
 
-           --partFilter:add( SpatialConvolution (fcState[1],fcState[2],fcIn[1],fcIn[2]))
-            local newConvModule = SpatialConvolution(prevFeaturesOut, curFeaturesOut, prevOutH, prevOutW)
-            action_str = string.format('Converted to Convolutional layer : %d -> %d [%dx%d]', prevFeaturesOut, curFeaturesOut, prevOutH, prevOutW)
-                           
+            --partFilter:add( SpatialConvolution (fcState[1],fcState[2],fcIn[1],fcIn[2]))
+            local dW,dH = 1,1
+            local padW,padH = math.ceil( (prevOutW-1)/2),  math.ceil( (prevOutH-1)/2 )
+            local newConvModule = SpatialConvolution(prevFeaturesOut, curFeaturesOut, prevOutW, prevOutH, dW, dH, padW,padH)
+            action_str = string.format('Converted to Convolutional layer : %d -> %d [%dx%d]. pad = %d, %d', 
+                prevFeaturesOut, curFeaturesOut, prevOutW, prevOutH, padW,padH)
+
             NewConvModule = newConvModule
             Module_i = module_i
             newConvModule.weight[{}] = module_i.weight:float()
             newConvModule.bias[{}]   = module_i.bias:float()
-                           
+
             local outputSize_str = tostring_inline( module_i.output:size() )
             newModel:add(newConvModule)
-            cprintf.Green('Module %d : %s : outputSize=%s  -> %s\n', i, module_i_name, outputSize_str, action_str)
-                           
+            if verbose then
+                cprintf.Green('%s : outputSize=%s  -> %s\n', module_i_name, outputSize_str, action_str)
+            end
+
         elseif module_i_name == 'nn.Reshape' then
-            
-            cprintf.red('Module %d : %s -> [Skipped]\n', i, module_i_name_full)
+            if verbose then
+                cprintf.red('%s -> [Skipped]\n', module_i_name_full)
+            end
         elseif module_i_name == 'nn.LogSoftMax' then
-            
-            cprintf.red('Module %d : %s -> [Skipped]\n', i, module_i_name_full)
+            if verbose then
+                cprintf.red('%s -> [Skipped]\n', module_i_name_full)
+            end
         else
             if (string.find(module_i_name, 'Convolution')) then
-                local conv
-                if     module_i_name == 'nn.SpatialConvolution' then
-                    conv = nn.SpatialConvolution
-                elseif module_i_name == 'nn.SpatialConvolutionMM' then
-                    conv = nn.SpatialConvolutionMM
-                elseif module_i_name == 'cudnn.SpatialConvolution' then
-                    conv = cudnn.SpatialConvolution
-                else
-                    error('Unknown convolution module')
-                end
+                local conv = eval(module_i_name)
+
                 if SpatialConvolution then
                     if SpatialConvolution ~= conv then
                         error('Multiple kinds of spatial convolution layers in this network')
@@ -1242,26 +1518,47 @@ expandLinearLayersToConvolutionalLayers = function(model, sampleInput)
                 else 
                     SpatialConvolution = conv
                 end
-                cprintf.yellow('[Conv]');
+
+                if verbose then
+                    cprintf.yellow('[Conv]');
+                end
             end
-            
-            local outputSize_str = tostring_inline( module_i.output:size() )
-            
+
+            if not module_i.output then
+                error(string.format('module %s does not have an output\n', module_i))
+            end
+
+            local outputSize
+            if type(module_i.output) == 'table' then
+                outputSize = table.apply(function(x) return x:size() end, module_i.output)
+            else
+                outputSize = module_i.output:size()
+            end
+            local outputSize_str = tostring_inline( outputSize )
+
             newModel:add( module_i )
-            cprintf.blue('Module %d : %s : outputSize=%s -> [Copied]\n', i, module_i_name, outputSize_str)
-                
+            if verbose then
+                cprintf.blue('%s : outputSize=%s -> [Copied]\n', module_i_name, outputSize_str)
+            end
+
         end
-        
-    
+
+
         if module_i_name ~= 'nn.Reshape' then
             prevModule = module_i
         end
     end
 
+    if onGPU then
+        newModel:cuda()
+    else
+        newModel:float()        
+    end
+
+    printf('\n')
 
     return newModel
 end
-
 
 
 
@@ -1408,151 +1705,185 @@ convertNetworkToMatlabFormat = function(model)
     --net.network_str = ''
     net.modules_str = ''
     net.nModules = 1
+    local firstModule_idx = {1}
 
-    addModules = function(net, modules)
-        --print('-----');
-        --print(modules)
-        --print('length = ', #modules)
+    addModules = function(net, tbl_modules, curModIdx)
 
-        for mod_j, module_i in ipairs(modules) do
+        for mod_j, module_i in ipairs(tbl_modules) do
 
+            --print('loop', mod_j, 'curModIdx', curModIdx)
+            --global_module_idx = global_module_idx + 1
             Module_i = module_i
             local module_full_str = torch.typename(module_i)
             --print(module_full_str )
             assert(string.sub(module_full_str, 1, 3) == 'nn.')
 
             local module_str = string.sub(module_full_str, 4, #module_full_str) -- remove 'nn.' prefix.
-            
+
             --[[    no longer necessary if we use torch.typename instead of tostring
             local idx_bracket = string.find(module_str, '[(]') -- remove parenthetical descriptors ( e.g. SpatialConvolution(1 -> 16, 5x5)  )
             if idx_bracket then
                 module_str = string.sub(module_str, 1, idx_bracket-1)
             end
             --]]
-            
+
 
             local j = net.nModules
 
-            if string.sub(module_str, 1, 10) == 'Sequential'  then
+            if module_str == 'Sequential'  then
 --                net.networkStr = net.networkStr .. module_full_str .. '
 
-                net = addModules(net, module_i.modules)
+                --print('Sequential --')
+                --local newModIdx = table.copy(curModIdx)
+                --newModIdx[#newModIdx] = newModIdx[#newModIdx] + 1
+                net = addModules(net, module_i.modules, curModIdx)
+
+
+            elseif module_str == 'Parallel'  then
+--                net.networkStr = net.networkStr .. module_full_str .. '
+
+                --print('Parallel --')
+                local A_byte = string.byte('A')
+                local newModIdx = table.copy(curModIdx)
+                local letter_depth = #newModIdx + 1
+                local number_depth = #newModIdx + 2
+
+                cprintf.red('%s%s [Parallel] : \n', string.rep(' ', #curModIdx *2), table.concat(curModIdx, '_')); -- module_idx_str, module_str)
+
+                --cprintf.red('%s%s:%s\n', string.rep(' ', (#curModIdx) *2), table.concat(curModIdx, '_'), let)
+                for j = 1, #module_i.modules do
+                    local let = string.char(A_byte -1 + j)
+
+                    cprintf.cyan('%s%s:%s\n', string.rep(' ', letter_depth *2), table.concat(curModIdx, '_'), let)
+                    newModIdx[letter_depth] = let
+                    newModIdx[number_depth] = 1
+                    --print(newModIdx)
+                    net = addModules(net, {module_i.modules[j]}, newModIdx)
+                end
 
             else 
-                net[ 'm' .. j .. '_str'] = str2vec(module_str)
+                net[ 'm' .. j .. '_str'] = string.toTensor(module_str):double()
                 local module_name_str = module_str
 
                 local requiredFieldNames = {}
                 local optionalFieldNames = {}
-                if module_str == 'SpatialConvolution' or  module_str == 'SpatialConvolutionCUDA'  then
-                    
+                if module_str == 'SpatialConvolution' or module_str == 'SpatialConvolutionMM' or  module_str == 'SpatialConvolutionCUDA'  then
+
                     requiredFieldNames = {'bias', 'weight', 'nInputPlane', 'nOutputPlane', 'kH', 'kW', 'dH', 'dW'}
-                    optionalFieldNames = {'padH', 'padW'}
+                    optionalFieldNames = {'padH', 'padW', 'padding'}
                     module_name_str = 'Conv'
-                    
+
                 elseif module_str == 'SpatialConvolutionMap' then
-                    
+
                     requiredFieldNames = {'bias', 'weight', 'nInputPlane', 'nOutputPlane', 'kH', 'kW', 'dH', 'dW', 'connTable'}  -- connTable optional?
                     module_name_str = 'Conv'
-                    
+
                 elseif module_str == 'SpatialSubSampling' then        
-                
+
                     requiredFieldNames = {'kH', 'kW', 'dH', 'dW', 'connTable'}
                     module_name_str = 'SubSamp'
 
                 elseif module_str == 'SpatialAveragePooling' then   
-                
+
                     requiredFieldNames = {'kH', 'kW', 'dH', 'dW', 'divide'}    
                     module_name_str = 'SubSamp'                
-                
+
                 elseif module_str == 'MulConstant' then   
-                
-                    requiredFieldNames = {'inplace', 'constant_scalar'}    
+
+                    requiredFieldNames = {'constant_scalar'}    
+                    optionalFieldNames = {'inplace',}
                     module_name_str = 'MulConst'     
-                
+
                 elseif module_str == 'SpatialZeroPadding' then                
-                    
+
                     requiredFieldNames = {'pad_l', 'pad_r', 'pad_t', 'pad_b'}
                     module_name_str = 'ZeroPad'
 
-                --elseif (module_str == 'SpatialMaxPooling') or (module_str == 'SpatialMaxPoolingCUDA') then                    
+                    --elseif (module_str == 'SpatialMaxPooling') or (module_str == 'SpatialMaxPoolingCUDA') then                    
                 elseif module_str == 'SpatialMaxPooling' then
-                
+
                     requiredFieldNames = {'kH', 'kW', 'dH', 'dW', 'indices'}   -- indices optional?
                     optionalFieldNames = {'padH', 'padW', 'ceil_mode'}
                     module_name_str = 'MaxPool'
-                
+
                 elseif module_str == 'SpatialLPPooling' then
-                
+
                     requiredFieldNames = {'kH', 'kW', 'dH', 'dW'}   -- indices optional?
                     optionalFieldNames = {} --'padH', 'padW',}
                     module_name_str = 'LPPool'
-                
+
                 elseif module_str == 'Reshape' then
-                
-                    requiredFieldNames = {'nelement', 'vector', 'size', 'batchsize'}
+
+                    requiredFieldNames = {'nelement', 'size', 'batchsize'}
+                    optionalFieldNames = {'vector'} 
                     module_name_str = 'Reshape'
-                
+
                 elseif module_str == 'Linear' then
 
                     requiredFieldNames = {'bias', 'weight'}
                     optionalFieldNames = {'addBuffer'}
                     module_name_str = 'Linear'
-                
+
                 elseif module_str == 'Transpose' then
                     requiredFieldNames = {'permutations'}
 
                 elseif (module_str == 'Sqrt') then
                     requiredFieldNames = {'eps'}
-                
+
+                elseif (module_str == 'ReLU') then
+                    requiredFieldNames = {'threshold', 'val'}
+                    optionalFieldNames = {'inplace'}
+
                 elseif (module_str == 'Power') then
                     requiredFieldNames = {'pow'}
 
                 elseif (module_str == 'Dropout') or (module_str == 'SpatialDropout')  then
                     requiredFieldNames = {'p', 'noise'}
                     optionalFieldNames = {'v2'}  -- for regular dropout
-                
+
                 elseif (module_str == 'Square') or (module_str == 'Sqrt') or (module_str == 'Copy') or 
-                    (module_str == 'Tanh') or (module_str == 'LogSoftMax') or (module_str == 'Exp')  then     
-                    
+                (module_str == 'Tanh') or (module_str == 'LogSoftMax') or (module_str == 'Exp')  then     
+
                 else                
-                    io.write('Unhandled case : module type = ' .. module_str)
+                    io.write('Unhandled case : module type = ' .. module_str .. '\n')
                     io.write('Fieldnames are: ')
-                    
+
                     print(table.fieldnames(module_i))
                     error('Fix to include this module')
 
                 end
-                
-                optionalFieldNames = table.merge(optionalFieldNames, {'train'})
-            
 
-            
+                optionalFieldNames = table.merge(optionalFieldNames, {'train', '_type'})
+
+
+
                 -- check that didn't leave any fields out:
                 local allfieldnames_have = table.fieldnames(module_i)
                 H = allfieldnames_have
                 local fieldNames_copied = table.merge(requiredFieldNames, optionalFieldNames)
                 allfieldnames_have = table.setdiff(allfieldnames_have, {'_input', 'gradInput', 'finput', 'fgradInput', 
                         'output', '_gradOutput', 'gradBias','gradWeight', 'modules'})
-                
+
                 local extraFields_lookedFor = table.setdiff(requiredFieldNames, allfieldnames_have)
                 local missingFields_notCopied = table.setdiff(allfieldnames_have, table.merge(requiredFieldNames, optionalFieldNames))
-                
+
                 if #extraFields_lookedFor > 0 then
                     print('Module ', mod_j, module_full_str, 'These fields were looked for, but not not present : ', extraFields_lookedFor)
                     error('Some fields were not present')
                 end
-                
+
                 if #missingFields_notCopied > 0 then
                     print('Module ', mod_j, module_full_str, 'These fields were left out : ', missingFields_notCopied)
                     error('Some fields were left out')
                 end
-                
+
                 net.modules_str = net.modules_str .. module_name_str .. ';' 
                 net.nModules = net.nModules + 1
 
 
-            
+                local module_idx_str = table.concat(curModIdx, '_')
+                cprintf.red('%s%s : %s\n', string.rep(' ', #curModIdx *2), module_idx_str, module_str)
+
                 for j = 1,2 do
                     local fldNames, required
                     if j == 1 then
@@ -1563,10 +1894,11 @@ convertNetworkToMatlabFormat = function(model)
                         required = false
                     end
 
+
                     for i,fieldName in ipairs(fldNames) do
                         local fieldVal = module_i[fieldName]
-                        local globFieldName = 'm' .. j .. '_' .. fieldName
-                        
+                        local globFieldName = 'm' .. module_idx_str .. '_' .. fieldName
+
                         if fieldVal == nil then
                             if required then 
                                 error(string.format('Module %s does not have field %s', module_str, fieldName))
@@ -1581,41 +1913,42 @@ convertNetworkToMatlabFormat = function(model)
                         elseif type(fieldVal) == 'boolean' then
                             local num = iff(fieldVal, 1, 0)
                             net[globFieldName] = torch.DoubleTensor(num)
+                        elseif type(fieldVal) == 'string' then
+                            net[globFieldName] = string.toTensor(fieldVal):double()
                         else
                             error(string.format('Unhandled type : %s is a %s [%s]', fieldName, type(fieldVal), tostring(fieldVal)))
                         end
-                    
+
                     end
                 end
-                
-              
+
+
                 -- some modules (like SpatialLPPooling) have submodules, even though are not Sequential types. add on their modules here
                 if module_i.modules  then
-                    net = addModules(net, module_i.modules)
+                    local newModIdx = table.copy(curModIdx)
+                    newModIdx[#newModIdx + 1] = 1
+                    --print('Sub')
+                    net = addModules(net, module_i.modules, newModIdx)
                 end
-              
-              
-            end
+
+
+            end -- if sequential / parallel / something else
+
+            curModIdx[#curModIdx] = curModIdx[#curModIdx]+1
         end    
+
 
         return net
     end
 
-    net = addModules(net, model.modules)
+    net = addModules(net, model.modules, firstModule_idx)
 
     net.nModules = torch.DoubleTensor({net.nModules - 1})
-    net.modules_str = str2vec(net.modules_str)
+    net.modules_str = string.toTensor(net.modules_str):double()
     return net
 
 end
 
-str2vec = function(s)
-    v = torch.DoubleTensor(#s)
-    for i = 1,#s do
-        v[i] = string.byte(s,i,i)    
-    end
-    return v
-end
 
 
 nOutputsFromConvStages = function(networkOpts, imageSize)
@@ -1679,5 +2012,253 @@ end
 
 
 
+cleanModel = function(model, fieldsToRemove, verbose)
+    local m = getStreamlinedModel(model)
+    local fieldsToRemove_default = {'_input', 'gradInput', 'finput', 'fgradInput', 
+                                'output', '_gradOutput', 'gradBias','gradWeight', 'buffer'}
+    fieldsToRemove = fieldsToRemove or fieldsToRemove_default
+
+    local t_type 
+    
+    --print('fieldsToRemove', fieldsToRemove)
+
+    cleanModule = function(mod)
+        if type(mod) ~= 'table' then
+            return
+        end
+        for fi, fld in ipairs(fieldsToRemove) do
+            if mod[fld] then
+                if not t_type then
+                    t_type = mod[fld]:type()
+                    printf('First field was a %s\n', t_type)
+                end
+                if verbose then
+                    printf('  cleaning %s\n', fld)    
+                end
+                mod[fld] = torch.Tensor():type(t_type)
+            end
+        end
+    end
 
 
+    cleanContainer = function(container)
+        if type(container) ~= 'table' then
+            return
+        end
+        
+        cleanModule(container)
+        if container.modules then
+            for mi, mod in ipairs(container.modules) do
+                if verbose then
+                    printf('Recursing for %s\n', torch.typename(mod))
+                end
+                cleanContainer(mod)
+                --if mod.modules then
+                 --   cleanModule(mod)
+                --end
+            end 
+        end
+        for mi, mod in pairs(container) do
+            --printf('Recursing for %s\n', torch.typename(mod))
+            --M = mod
+            --Mi = mi
+            cleanContainer(mod)
+            --if mod.modules then
+             --   cleanModule(mod)
+            --end
+        end 
+    end
+
+    cleanContainer(model)
+
+end
+
+
+
+expandPatchModelToHandleFullImages = function(model_struct, opt)
+    opt = opt or {}
+    local useGPU = opt.useGPU 
+    local default_tensorType = 'torch.FloatTensor'
+    if useGPU then
+        default_tensorType = 'torch.CudaTensor'
+    end
+    MS = model_struct
+    local network_sz = model_struct.networkOpts.partModelOpts.networkInputSize_pix
+    if type(network_sz) == 'number' then
+        network_sz = {network_sz, network_sz}
+    end
+
+    local fullImageSize_pix = model_struct.networkOpts.partModelOpts.fullImageSize_pix
+
+    local scales = model_struct.stimOpts.scales
+    local nScales = #scales
+
+    local useTableForOneScale = false
+
+    if nScales == 1 and not useTableForOneScale then
+
+        if not model_struct.expandedModel then
+            patch_img = torch.randn(1, network_sz[1], network_sz[2]):type(default_tensorType)
+            convFunction = eval('nn.' ..  model_struct.networkOpts.convFunction)
+
+            model_struct.expandedModel = expandLinearLayersToConvolutionalLayers(model_struct.model, patch_img, {SpatialConvolution=convFunction})
+        end
+
+    elseif nScales > 1 or (nScales == 1 and useTableForOneScale) then
+
+        if not model_struct.expandedTableModel or opt.recalculate then
+            --local patch_img_rep = torch.randn(nScales, 1, network_sz[1], network_sz[2]):type(default_tensorType)
+            sample_patch_simple = torch.randn(nScales, 1, network_sz[1], network_sz[2]):type(default_tensorType)            
+
+            sample_patch = torch.randn(1, network_sz[1], network_sz[2]):type(default_tensorType)            
+            sample_patch_tbl = replicateImageAtScales(sample_patch, scales)
+
+            sample_image = torch.randn(1, fullImageSize_pix[1], fullImageSize_pix[2]):type(default_tensorType)            
+            sample_image_tbl = replicateImageAtScales(sample_image, scales)
+
+           
+            par = model_struct.model.modules[1]
+            for par_idx = 1, par:size() do
+                par_i = par.modules[par_idx]
+                local nMods = par_i:size()
+                if torch.typename( par_i.modules[nMods] ) == 'nn.SpatialUpSamplingNearest' then
+                    cprintf.cyan('Removed upsampling (mod %d) from parallel track #%d\n', nMods, par_idx)
+                    par_i:remove(nMods)
+                end
+            end
+            
+            -- if have trained final weights, make sure dont' lose their values!@!!!!!!!!!!!!!!!!!
+            if model_struct.expandedTableModel then
+               c1 = findModuleOfType(model_struct.expandedTableModel, 'conv', -2)
+               c2 = findModuleOfType(model_struct.expandedTableModel, 'conv', -1)
+               
+               l1 = findModuleOfType(model_struct.model, 'linear', -2)
+               l2 = findModuleOfType(model_struct.model, 'linear', -1)
+               
+               copyWeightsAndBiases(c1, l1)
+               copyWeightsAndBiases(c2, l2)
+               
+               
+            end
+                
+                ---[[
+            cleanModel(model_struct.model, {'output'})
+            if useGPU then
+                model_struct.model:cuda()
+            end
+            --]]
+            
+            
+            model_struct.model:forward(sample_patch_simple)
+        --]]
+                
+            model_struct.tableModel = convertToTableModelWithUpsampling(model_struct.model, scales, network_sz)
+    
+            model_struct.tableModel = addPaddingToParallelTableModel(model_struct.tableModel, scales, network_sz)
+
+            if useGPU then
+                model_struct.tableModel:cuda()
+            else
+                model_struct.tableModel:float()
+            end
+
+            -- with new padding, make sure can successfully forward a patch
+            model_struct.tableModel:forward(sample_patch_tbl)
+
+            local convFunction = eval('nn.' ..  model_struct.networkOpts.convFunction)
+
+            model_struct.expandedTableModel = expandLinearLayersToConvolutionalLayers(model_struct.tableModel, sample_patch_tbl, {SpatialConvolution=convFunction})
+            
+            model_struct.expandedTableModel = addPaddingToParallelTableModel(model_struct.expandedTableModel, scales, fullImageSize_pix)
+
+            -- with new padding, make sure can successfully forward a full image
+            model_struct.expandedTableModel:forward(sample_image_tbl)
+            
+            --ETM = model_struct.expandedTableModel
+            -- verify that have not affected the patch model, and that it can still forward a patch
+            model_struct.tableModel:forward(sample_patch_tbl)            
+            
+            model_struct.expandedTableModel:forward(sample_image_tbl)
+
+            --cprintf.Red(' expandedTableModel = ')
+            --print(model_struct.expandedTableModel)
+            
+        end
+
+    end
+end
+
+
+
+convertModelToFloat = function(arg)
+
+    local haveFileName = type(arg) == 'string'
+    local fileName
+    local model_struct 
+    if haveFileName then
+        fileName = arg
+        S = torch.load(fileName)
+        model_struct = S.model_struct
+
+    elseif arg.model_struct then
+        model_struct = arg.model_struct
+
+    elseif arg.modelType and arg.modelType == 'model_struct' then
+        model_struct = arg
+    end
+
+
+    model_struct.model:float()
+    if model_struct.criterion then
+        model_struct.criterion:float()
+    end
+    if model_struct.criterion then
+        model_struct.criterion:float()
+    end
+
+    if model_struct.model_combined_pos then
+        model_struct.model_combined_pos:float()
+    end
+
+    if model_struct.feat_extractor then
+        model_struct.feat_extractor:float()
+    end
+
+    if haveFileName then
+        torch.save(fileName)
+    end
+
+end
+
+
+findAllCudaModules = function(S, depth)
+    depth = depth or 0
+    if depth == 0 then
+--        total = 0
+    end
+
+    --if torch.typename(S) == 'torch.CudaTensor' then
+    --printf('CudaTensor')
+
+
+    if type(S) == 'table'  then
+
+        for k,v in pairs(S) do
+            --cprintf.red('%s %s = %s [ v] \n', string.rep('  ', depth), tostring(k), tostring(v), torch.typename(v) )
+            tp = torch.typename(v) or type(v)
+            str = string.format('%s %s [%s] \n', string.rep('  ', depth), tostring(k), tp )
+            if string.find(tp, 'Cuda') then
+                cprintf.red(str )
+                --total = total + 1
+            else
+                cprintf.blue(str )
+            end
+
+            findAllCudaModules(v, depth + 1)
+        end        
+    end
+
+    if depth == 0 then
+
+    end
+end

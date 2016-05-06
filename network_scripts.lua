@@ -23,6 +23,10 @@ getNetworkStr = function(networkOpts)
         local partModelOpts_str = '_' .. getPartModelOptStr(networkOpts.partModelOpts)  -- e.g. indep_90 (independent scales, 90x90 input)
         netStr = netStr .. partModelOpts_str
     end
+    
+    if networkOpts.trialId and networkOpts.trialId ~= 1 then
+        netStr = netStr .. '__tr' .. networkOpts.trialId
+    end
         
         
     return  netStr, netStr_nice
@@ -455,7 +459,7 @@ end
 
     
 getConvNetStr = function(networkOpts, niceOutputFields)
-    N0 = table.copy(networkOpts)
+    --N0 = table.copy(networkOpts)
     local defaultParams = getDefaultConvNetParams(networkOpts.defaultNet)
     
     local defaultPoolStrideIsAuto = true
@@ -509,7 +513,7 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     
     local poolPad_str = '';
     local poolPad_str_nice = ''
-    if not networkOpts.zeroPadForPooling then   -- default is : DO add zeroPadding before pooling
+    if networkOpts.zeroPadForPooling == false then   -- default is : DO add zeroPadding before pooling
         poolPad_str = 'NP'
         poolPad_str_nice = '(NP)'
     end
@@ -668,21 +672,37 @@ getConvNetStr = function(networkOpts, niceOutputFields)
     
     local dropout_str = getDropoutStr(networkOpts)
     
+    local initializeLayers_str = getInitializeLayersStr(networkOpts)
     
     local convNet_str      = convFcn_str .. nStates_str      ..
             filtSizes_str  .. 
             doPooling_str  .. poolSizes_str      .. poolTypes_str      .. poolStrides_str ..  
-            nLinType_str .. dropout_str .. gpu_str
+            nLinType_str .. dropout_str .. gpu_str  .. initializeLayers_str
     
     local convNet_str_nice = convFcn_str .. nStates_str_nice .. 
             filtSizes_str_nice ..  
             doPooling_str_nice .. poolSizes_str_nice .. poolTypes_str_nice .. poolStrides_str_nice  .. 
-            nLinType_str_nice .. dropout_str .. gpu_str
+            nLinType_str_nice .. dropout_str .. gpu_str .. initializeLayers_str
             
     return convNet_str, convNet_str_nice
     
 end
 
+
+
+
+
+
+getInitializeLayersStr = function(networkOpts)
+    local initializeLayers_str = ''
+        
+    if networkOpts.initializeFirstLayer then
+        initializeLayers_str = '__init_' .. networkOpts.autoEncoderNetworkName
+        
+    end    
+    return initializeLayers_str
+    
+end
 
 
 getTrainOnGPUStr = function(networkOpts)
@@ -824,7 +844,7 @@ end
 torch.isClassifierCriterion = function (criterionName)
     if criterionName == 'nn.ClassNLLCriterion' then
         return true
-    elseif criterionName == 'nn.MSECriterion' or criterionName == 'nn.mycri' or criterionName == 'nn.mycri_kai' then
+    elseif table.any( strcmp(criterionName, {'nn.MSECriterion', 'nn.WeightedMSECriterion', 'nn.mycri', 'nn.mycri_kai'})) then
         return false
     else
         error('Unknown criterion name')

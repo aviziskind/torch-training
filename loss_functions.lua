@@ -5,7 +5,7 @@ require 'nn'      -- provides all sorts of loss functions
 --dofile 'mycri_kai.lua'
 
 
-getLossFunction = function(loss_function_name)
+getLossFunction = function(loss_function_name, arg1)
 
   
   local criterion
@@ -35,6 +35,20 @@ getLossFunction = function(loss_function_name)
      -- we still provide it here:
      criterion = nn.MSECriterion()
      criterion.sizeAverage = false
+   
+
+    elseif loss_function_name == 'wmse' then
+
+     -- for MSE, we add a tanh, to restrict the model's output
+     --model:add(nn.Tanh())
+
+     -- The mean-square error is not recommended for classification
+     -- tasks, as it typically tries to do too much, by exactly modeling
+     -- the 1-of-N distribution. For the sake of showing more examples,
+     -- we still provide it here:
+     criterion = nn.WeightedMSECriterion(arg1)
+     criterion.sizeAverage = false
+
      
   elseif loss_function_name == 'mycri' then
       --model:add(nn.Tanh())

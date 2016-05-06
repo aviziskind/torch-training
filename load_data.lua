@@ -147,7 +147,7 @@ function loadFile(filename, deleteIfCantLoad)
                 print('Received stop signal from user. Aborting....');
                 error('Stop')
             end
-            local sec_wait = 1 + math.mod(torch.random(),3)
+            local sec_wait = 1 + math.modf(torch.random(),3)
             print(string.format('Load failed, trying again in %s seconds', sec_wait))
             sys.sleep(sec_wait)
             nTries = nTries + 1
