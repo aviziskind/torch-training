@@ -20,8 +20,10 @@ getNetworkStr = function(networkOpts)
     end
         
     if networkOpts.partModelOpts then  
-        local partModelOpts_str = '_' .. getPartModelOptStr(networkOpts.partModelOpts)  -- e.g. indep_90 (independent scales, 90x90 input)
-        netStr = netStr .. partModelOpts_str
+        local partModelOpts_str = getPartModelOptStr(networkOpts.partModelOpts)  -- e.g. indep_90 (independent scales, 90x90 input)
+        if partModelOpts_str ~= '' then
+            netStr = netStr .. '_' .. partModelOpts_str
+        end
     end
     
     if networkOpts.trialId and networkOpts.trialId ~= 1 then

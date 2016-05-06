@@ -2014,28 +2014,46 @@ end
 
 cleanModel = function(model, fieldsToRemove, verbose)
     local m = getStreamlinedModel(model)
-    local fieldsToRemove_default = {'_input', 'gradInput', 'finput', 'fgradInput', 
-                                'output', '_gradOutput', 'gradBias','gradWeight', 'buffer'}
+    local fieldsToRemove_default = {'_input', 'finput', 'gradInput', 'fgradInput', 
+                                     'output', '_gradOutput', 'gradBias','gradWeight', 'buffer', 'indices'}
+             
     fieldsToRemove = fieldsToRemove or fieldsToRemove_default
 
+    local skipOutputOfParallelTable = true
     local t_type 
     
-    --print('fieldsToRemove', fieldsToRemove)
+    print('fieldsToRemove', fieldsToRemove)
 
     cleanModule = function(mod)
         if type(mod) ~= 'table' then
             return
         end
+        
+        if mod.networkOpts and  mod.networkOpts.trainConfig and mod.networkOpts.trainConfig.dfdx  then
+            cprintf.Red('Removed dfdx\n')
+            mod.networkOpts.trainConfig.dfdx = nil
+        end
+        
         for fi, fld in ipairs(fieldsToRemove) do
             if mod[fld] then
-                if not t_type then
-                    t_type = mod[fld]:type()
-                    printf('First field was a %s\n', t_type)
+                if fld == 'output' then
+                   -- cprintf.green('Removing %s from %s\n', fld, torch.typename( mod ) )
                 end
-                if verbose then
-                    printf('  cleaning %s\n', fld)    
+                if fld == 'output' and torch.typename( mod ) == 'nn.ParallelTable' and skipOutputOfParallelTable  then
+                    --cprintf.Red('skipping\n')
+                else
+                    if fld == 'output' then
+                       -- cprintf.green('Removing %s from %s\n', fld, torch.typename( mod ) )
+                    end
+                    if not t_type and torch.isTensor(mod[fld]) then
+                        t_type = mod[fld]:type()
+                        printf('First field was a %s\n', t_type)
+                    end
+                    if verbose then
+                        printf('  cleaning %s\n', fld)    
+                    end
+                    mod[fld] = torch.Tensor():type(t_type)
                 end
-                mod[fld] = torch.Tensor():type(t_type)
             end
         end
     end
@@ -2189,9 +2207,9 @@ expandPatchModelToHandleFullImages = function(model_struct, opt)
 end
 
 
-
+      
 convertModelToFloat = function(arg)
-
+    
     local haveFileName = type(arg) == 'string'
     local fileName
     local model_struct 
@@ -2203,11 +2221,12 @@ convertModelToFloat = function(arg)
     elseif arg.model_struct then
         model_struct = arg.model_struct
 
-    elseif arg.modelType and arg.modelType == 'model_struct' then
+    elseif arg.modelType and arg.modelType == 'model_struct' or true then
+        
         model_struct = arg
     end
 
-
+    --[[
     model_struct.model:float()
     if model_struct.criterion then
         model_struct.criterion:float()
@@ -2223,6 +2242,24 @@ convertModelToFloat = function(arg)
     if model_struct.feat_extractor then
         model_struct.feat_extractor:float()
     end
+    --]]
+    recurseForNonFloats = function(tbl)
+        
+        if not (type(tbl) == 'table' or torch.typename(tbl)) then
+            return
+        end
+        for fld, val in pairs(tbl) do
+            --printf(' %s  \n', fld)
+            if torch.typename( val ) then
+                tbl[fld]=tbl[fld]:float()
+            elseif type(val) == 'table' then
+                recurseForNonFloats(val)
+            end
+            
+        end
+    end
+
+    recurseForNonFloats(model_struct)
 
     if haveFileName then
         torch.save(fileName)
@@ -2261,4 +2298,12 @@ findAllCudaModules = function(S, depth)
     if depth == 0 then
 
     end
+end
+
+saveFieldsToFiles = function(S, prefix)
+   for k,v in pairs(S) do
+        printf('Saving %s to file %s\n', k, prefix .. k)
+        torch.save(prefix .. k, v)
+    end
+    
 end

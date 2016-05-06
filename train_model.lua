@@ -98,7 +98,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
 
     local trainConfusionMtx = optim.ConfusionMatrix(nOutputs)
     
-    local resizeInputToVector = model_struct.parameters.resizeInputToVector or false
+    local resizeInputToVector = false --model_struct.parameters.resizeInputToVector or false
     
     local trainingFileBase = trainingOpts.trainingFileBase
     
@@ -653,21 +653,22 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 -- end
                 loss = loss + extraLoss
                 if _idx_ <= 10 then
-                    cprintf.Red('Loss = %.10f. Output[1] = %.10f. W[1] = %.10f. P = %.10f\n', 
-                        ExtraLoss, Output[1], firstWeightVal( findModuleOfType(model_struct.model, 'linear', 1) ), modelP:sum()  );
+                    --cprintf.Red('Loss = %.10f. Output[1] = %.10f. W[1] = %.10f. P = %.10f\n', 
+                      --  ExtraLoss, Output:view(-1)[1], firstWeightVal( findModuleOfType(model_struct.model, 'linear', 1) ), modelP:sum()  );
                     
-                    progressBar.printf('.')
+                    --progressBar.printf('.')
                 end
                 if _idx_ == 10 then
-                    error('!')
+                   -- error('!')
                 
                 end
                 --model_toTrain:backward(input, criterion:backward(output, target))
                
                 if trainingClassifier then
-                    trainConfusionMtx:add(output,target)          
+                    trainConfusionMtx:add(output:view(-1),target)          
                 end
                 
+                --error('!')
                 
                
                                 showOutputAverages = true
@@ -813,7 +814,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         local loss = 0
             
         for j = 1, nTrainingSamples/batchSize do
-                    
+                    --cprintf.Cyan('Got HERE!')
             local _,fs = optim.sgd_auto(feval,parameters,trainingLogger.sgd_config)
             --allLoss[j] = fs[1]
                        
