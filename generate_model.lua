@@ -38,6 +38,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
     local nLinType = networkOpts.nLinType or 'Tanh'
     assert(nLinType)
 
+    local addConfidenceUnits = networkOpts.nConfidenceUnits and  networkOpts.nConfidenceUnits > 0
+    
     --input layer 
 
     if networkOpts.netType == 'MLP'  then
@@ -63,6 +65,9 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         end
 
         --output layer
+        addFinalLayer(classifier, nUnitsInLastLayer, nOutputs, finalLayer, networkOpts.nConfidenceUnits)
+        
+        --[[
         classifier:add(  nn.Linear(nUnitsInLastLayer, nOutputs) )
         print('finalLayer', finalLayer)
         if finalLayer == 'LogSoftMax' then
@@ -74,6 +79,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         else
             error('Unknown final layer type : ' .. finalLayer )
         end
+        --]]
 
         if nPositions > 1 then
             local indiv_pos_classifier = nn.Linear(nUnitsInLastLayer, nOutputs * nPositions);
@@ -130,6 +136,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
         local fullyConnectedDropoutPs = table.rep(0, nFCLayers)
 
         local dropoutPs = n.dropoutPs
+        DD = dropoutPs 
         local useSpatialDropout = n.spatialDropout
         if dropoutPs then
             if type(dropoutPs) == 'number' then     
@@ -139,7 +146,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     fcPs = {-dropoutPs} --fullyConnectedDropoutPs = table.rep(-dropoutPs, nFCLayers)
                 end
 
-
+               
             elseif type(dropoutPs) == 'table' then
                 local idx_firstPos = table.find(dropoutPs, function (x) return x>0; end)
                 local idx_firstNeg = table.find(dropoutPs, function (x) return x<0; end)
@@ -161,7 +168,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     convLayerDropoutPs[nConvLayers - #convPs + j] =  convPs[j]
                 end
             end
-
+            
             if fcPs then    -- dropoutPs = {0.5, -0.5} : dropout in all convolutional layers with p = 0.5
                 local negative = function(x) return -x; end
                 fullyConnectedDropoutPs = table.apply(negative,   fcPs)  -- extend
@@ -169,14 +176,14 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                     fullyConnectedDropoutPs = fcPs  
                 else
                     assert(#fcPs == 1)
-                    fullyConnectedDropoutPs = table.rep(-fcPs[1], nFCLayers)
+                    fullyConnectedDropoutPs = table.rep(fcPs[1], nFCLayers)
                 end
 
             end
             --print(convPs)
             --print('convLayerDropoutPs', convLayerDropoutPs)
-            --print('fullyConnectedDropoutPs', fullyConnectedDropoutPs)
-
+            print('fullyConnectedDropoutPs', fullyConnectedDropoutPs)
+        
         end
 
         local doDropoutInConvLayers = #convLayerDropoutPs > 0
@@ -420,6 +427,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
         nUnitsInLastLayer = nOutputs_last
         -- fully-connected layers (if any)
+        print('nStatesFC', nStatesFC)
         if nFCLayers > 0 then
             for layer_i,nUnitsInThisLayer in ipairs(nStatesFC) do
 
@@ -436,19 +444,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
             end
         end
-
-        --classifier 
-        classifier:add(  nn.Linear(nUnitsInLastLayer, nOutputs) )
-
-        if finalLayer == 'LogSoftMax' then
-            classifier:add(  nn.LogSoftMax() )
-        elseif finalLayer == 'Sigmoid' then
-            classifier:add(  nn.Sigmoid() )
-        elseif finalLayer == '' then
-            -- do nothing 
-        else
-            error('Unknown final layer type : ' .. finalLayer )
-        end
+  
+        addFinalLayer(classifier, nUnitsInLastLayer, nOutputs, finalLayer, networkOpts.nConfidenceUnits)
 
 
         if nPositions > 1 then
@@ -489,6 +486,8 @@ generateModel = function(inputStats, networkOpts, letterOpts)
     -- add model (with feature extractor & classifier) to the model_struct container
     local model_struct = {}
     model_struct.parameters = params
+    
+ 
 
 
     local model = nn.Sequential()
@@ -520,8 +519,6 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
     --model_struct.feat_extractor = feat_extractor
     --model_struct.classifier = classifier      
-
-
 
     --[[
     model_struct.gpu = {}
@@ -559,6 +556,58 @@ getNonlinearity = function(nLinType)
 
 end
 
+
+
+addFinalLayer = function(classifier, nUnitsInLastLayer, nOutputs, finalLayer, nConfidenceUnits)
+        --classifier 
+        
+    if not nConfidenceUnits or nConfidenceUnits == 0 then
+
+        classifier:add(  nn.Linear(nUnitsInLastLayer, nOutputs) )
+
+           
+
+    elseif  nConfidenceUnits then
+        cprintf.Red('Adding %d Confidence units\n', nConfidenceUnits)
+        local linear_module = nn.Linear(nUnitsInLastLayer, nOutputs)
+
+        local confidence_module = nn.Sequential()
+        confidence_module:add( nn.Linear(nUnitsInLastLayer, nConfidenceUnits) )
+        confidence_module:add( nn.Sigmoid() )
+        
+        local concat_module = nn.Concat(1)
+        concat_module:add(linear_module)
+        concat_module:add(confidence_module)
+        classifier:add(concat_module)
+
+    --[[
+        local nOutputs_use = nOutputs*2
+        classifier:add(  nn.Linear(nUnitsInLastLayer, nOutputs_use) )
+        classifier:add(nn.Reshape(2, nOutputs) )
+        
+        parModel = nn.Parallel(1, 1)
+        parModel:add( nn.Identity() )
+        parModel:add( nn.Sigmoid() )
+        
+        classifier:add(nn.Reshape(2, nOutputs) )
+    --]]        
+
+    end
+    
+    if finalLayer == 'LogSoftMax' then
+        classifier:add(  nn.LogSoftMax() )
+    elseif finalLayer == 'Sigmoid' then
+        classifier:add(  nn.Sigmoid() )
+    elseif finalLayer == '' then
+        -- do nothing 
+    else
+        error('Unknown final layer type : ' .. finalLayer )
+    end
+
+
+
+
+end
 
 moveModelToGPU = function(model_struct)
 
@@ -1312,6 +1361,10 @@ convertToTableModelWithUpsampling = function(model, scales, opt)
 
     newModel:add(parTableModule)
     newModel:add( nn.JoinTable(1) )
+    if opt.spatialDropout then
+        cprintf.Red('Added Spatial Dropout to table model...\n');
+        newModel:add( nn.SpatialDropout(0.5) )
+    end
     newModel:add(seqModule)
 
     if onGPU then
@@ -1507,6 +1560,14 @@ expandLinearLayersToConvolutionalLayers = function(model, sampleInput, opt)
             if verbose then
                 cprintf.red('%s -> [Skipped]\n', module_i_name_full)
             end
+        elseif module_i_name == 'nn.Dropout' and opt.spatialDropout then
+            local p = module_i.p
+            if verbose then
+                cprintf.Green('%s --> SpatialDropout(%s)]\n', module_i_name_full, tostring(p) )
+            end
+            newDropoutModule = nn.SpatialDropout(p)
+            newModel:add(newDropoutModule)            
+            
         else
             if (string.find(module_i_name, 'Convolution')) then
                 local conv = eval(module_i_name)
@@ -1700,6 +1761,7 @@ end
 
 convertNetworkToMatlabFormat = function(model)
 
+    model =getStreamlinedModel(model)
     local net = {}
 
     --net.network_str = ''
@@ -1836,6 +1898,11 @@ convertNetworkToMatlabFormat = function(model)
 
                 elseif (module_str == 'Power') then
                     requiredFieldNames = {'pow'}
+                elseif (module_str == 'Sigmoid') then
+                    --requiredFieldNames = {}
+                
+                elseif (module_str == 'Concat') then
+                    requiredFieldNames = {'dimension', 'size'}
 
                 elseif (module_str == 'Dropout') or (module_str == 'SpatialDropout')  then
                     requiredFieldNames = {'p', 'noise'}
@@ -2112,14 +2179,16 @@ expandPatchModelToHandleFullImages = function(model_struct, opt)
     local nScales = #scales
 
     local useTableForOneScale = false
-
+    local convFunction = eval('nn.' ..  model_struct.networkOpts.convFunction)
+    opt_expand = table.copy(opt)
+    opt_expand.SpatialConvolution = convFunction 
+            
     if nScales == 1 and not useTableForOneScale then
 
         if not model_struct.expandedModel then
             patch_img = torch.randn(1, network_sz[1], network_sz[2]):type(default_tensorType)
-            convFunction = eval('nn.' ..  model_struct.networkOpts.convFunction)
-
-            model_struct.expandedModel = expandLinearLayersToConvolutionalLayers(model_struct.model, patch_img, {SpatialConvolution=convFunction})
+            
+            model_struct.expandedModel = expandLinearLayersToConvolutionalLayers(model_struct.model, patch_img, opt_expand)
         end
 
     elseif nScales > 1 or (nScales == 1 and useTableForOneScale) then
@@ -2170,7 +2239,7 @@ expandPatchModelToHandleFullImages = function(model_struct, opt)
             model_struct.model:forward(sample_patch_simple)
         --]]
                 
-            model_struct.tableModel = convertToTableModelWithUpsampling(model_struct.model, scales, network_sz)
+            model_struct.tableModel = convertToTableModelWithUpsampling(model_struct.model, scales, opt)
     
             model_struct.tableModel = addPaddingToParallelTableModel(model_struct.tableModel, scales, network_sz)
 
@@ -2183,9 +2252,8 @@ expandPatchModelToHandleFullImages = function(model_struct, opt)
             -- with new padding, make sure can successfully forward a patch
             model_struct.tableModel:forward(sample_patch_tbl)
 
-            local convFunction = eval('nn.' ..  model_struct.networkOpts.convFunction)
 
-            model_struct.expandedTableModel = expandLinearLayersToConvolutionalLayers(model_struct.tableModel, sample_patch_tbl, {SpatialConvolution=convFunction})
+            model_struct.expandedTableModel = expandLinearLayersToConvolutionalLayers(model_struct.tableModel, sample_patch_tbl, opt_expand)
             
             model_struct.expandedTableModel = addPaddingToParallelTableModel(model_struct.expandedTableModel, scales, fullImageSize_pix)
 
@@ -2307,3 +2375,17 @@ saveFieldsToFiles = function(S, prefix)
     end
     
 end
+
+batchForward = function(model, inputMatrix)
+    --outputMatrix = model_struct.model : forward( inputMatrix )
+    local nInputs = inputMatrix:size(1)
+    sample_out = model:forward(inputMatrix[1])
+    outputMatrix = torch.Tensor( torch.concat(nInputs, sample_out:size()) ):typeAs(inputMatrix)
+    for j = 1,nInputs do
+        outputMatrix[j] = model:forward(inputMatrix[j])
+    end
+    return outputMatrix
+    
+end
+
+

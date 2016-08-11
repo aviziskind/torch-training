@@ -26,6 +26,10 @@ getNetworkStr = function(networkOpts)
         end
     end
     
+    if networkOpts.nConfidenceUnits and networkOpts.nConfidenceUnits > 0 then
+        netStr = netStr .. string.format('_Conf%d', networkOpts.nConfidenceUnits)
+    end
+    
     if networkOpts.trialId and networkOpts.trialId ~= 1 then
         netStr = netStr .. '__tr' .. networkOpts.trialId
     end
@@ -808,12 +812,12 @@ getDropoutStr = function(networkOpts)
     local dropout_default = -0.5
     if networkOpts.dropoutPs and not isequal(networkOpts.dropoutPs, {})  and not isequal(networkOpts.dropoutPs, 0) then
         if networkOpts.spatialDropout then
-            dropout_str = '_Dr'
-        else
             dropout_str = '_SDr'
+        else
+            dropout_str = '_Dr'
         end
         if not isequal(networkOpts.dropoutPs, dropout_default) then 
-            dropout_str = dropout_str .. toList(networkOpts.dropoutPs)
+            dropout_str = dropout_str .. tostring_nodot( toList(networkOpts.dropoutPs) )
         end
     end
     
@@ -854,6 +858,18 @@ torch.isClassifierCriterion = function (criterionName)
 
 end
 
+
+moveToGPU = function(x)
+    if type(x) == 'table' then   -- multi-scale (table of tensors)
+        for i = 1,#x do
+            x[i] = x[i]:cuda()
+        end
+    else
+        x = x:cuda()
+    end
+    return x
+end
+   
 
 --[[
     -- SUBTRACTIVE Normalization
