@@ -533,7 +533,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 if resizeInputToVector then           -- even if model already reshapes input, 
                     input = input:resize(nInputFeats)  -- model:backward needs vector for simple networks
                 end
-                Model_toTrain = model_toTrain
+                    Model_toTrain = model_toTrain
 
 
                 local output = model_toTrain:forward(input)
@@ -653,13 +653,13 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 -- end
                 loss = loss + extraLoss
                 if _idx_ <= 10 then
-                    cprintf.Red('Loss = %.10f. Output[1] = %.10f. W[1] = %.10f. P = %.10f\n', 
-                        ExtraLoss, Output[1], firstWeightVal( findModuleOfType(model_struct.model, 'linear', 1) ), modelP:sum()  );
+                    --cprintf.Red('Loss = %.10f. Output[1] = %.10f. W[1] = %.10f. P = %.10f\n', 
+                      --  ExtraLoss, Output[1], firstWeightVal( findModuleOfType(model_struct.model, 'linear', 1) ), modelP:sum()  );
                     
-                    progressBar.printf('.')
+                    --progressBar.printf('.')
                 end
                 if _idx_ == 10 then
-                    error('!')
+                    --error('!')
                 
                 end
                 --model_toTrain:backward(input, criterion:backward(output, target))
@@ -670,7 +670,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 
                 
                
-                                showOutputAverages = true
+                showOutputAverages = false
                 
                 if showOutputAverages then
                     outputAverageN = 200
@@ -703,11 +703,11 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                         allOutputSums[ cur_idx] = extraLoss
                         
                         
-                      if _idx_ % outputAverageN == 0 then
-                            progressBar.printf('\n- i = %d.    loss_av =  %.10f.   pct_correct_av = %.10f --\n', 
-                                _idx_, allOutputSums:mean(), allOutputCorr:mean()*100)
+                      --if _idx_ % outputAverageN == 0 then
+                            --progressBar.printf('\n- i = %d.    loss_av =  %.10f.   pct_correct_av = %.10f --\n', 
+                            --    _idx_, allOutputSums:mean(), allOutputCorr:mean()*100)
                         --error('!')
-                      end
+                      --end
                         
                     end
                         
@@ -732,7 +732,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             local batchIdxRange = { _idx_,  _idx_ + nThisBatch - 1 } 
             --local nThisBatch = batchIdxs[2] - batchIdxs[1] + 1
             
-            --progressBar.step(_idx_)
+            progressBar.step(_idx_)
             local sampleIdxs = trainingIdxs[{batchIdxRange}]
             TrainInputs = trainInputs
             --inputs = permuteBatchDimTo4(trainInputs, batchIndices)
