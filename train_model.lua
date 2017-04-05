@@ -60,11 +60,18 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         print('origCriterion', origCriterion)
         print('extraCriterion', extraCriterion)
     end
+    EC = extraCriterion
 
-    local criterion_firstEpoch = model_struct.criterion_firstEpoch
-    
+    criterion_firstEpoch = model_struct.criterion_firstEpoch
+    local nEpochsFirstCriterion = 1
     if criterion_firstEpoch then
-        cprintf.yellow('criterion for first epoch = %s\n', criterion_firstEpoch)
+        if criterion_firstEpoch.nEpochs then
+            nEpochsFirstCriterion = criterion_firstEpoch.nEpochs
+        end
+        if criterion_firstEpoch.nEpochsTitration then
+            nEpochsFirstCriterion = nEpochsFirstCriterion + criterion_firstEpoch.nEpochsTitration
+        end
+        cprintf.yellow('criterion for first %d epoch(s) = %s\n', nEpochsFirstCriterion, criterion_firstEpoch)
     end
     
     --local MSEWeightsDependOnTarget =  (torch.typename(criterion) == 'nn.WeightedMSECriterion') and criterion.MSEWeightsDependOnTarget
@@ -98,7 +105,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
 
     local trainConfusionMtx = optim.ConfusionMatrix(nOutputs)
     
-    local resizeInputToVector = model_struct.parameters.resizeInputToVector or false
+    local resizeInputToVector = false --model_struct.parameters.resizeInputToVector or false
     
     local trainingFileBase = trainingOpts.trainingFileBase
     
@@ -125,6 +132,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local trainingLogger = optim.TrainingLogger(trainingOpts)    
     trainingLogger:setFile(torchLogFile)
         
+    local curEpochIdx
 
     local sgd_config_default = {
         learningRate = 1e-3,
@@ -209,6 +217,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         
         nEpochsDone      = trainingLogger.nEpochs
         model_struct     = trainingLogger.model_struct
+        if model_struct.sampleJointErrors and useFunctionToGetTrainingIdx then
+            getTrainingIdx(model_struct.sampleJointErrors)
+        end
+        
                 
         local prev_train_loss   = trainingLogger:currentLoss()
         local prev_trainErr_pct = trainingLogger:currentTrainErr()
@@ -487,10 +499,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         
         local loss = 0;
         local nThisBatch = batchSize
-        local curEpoch = nEpochsDone+1
         --GroupBatch = groupBatch
         if not groupBatch then
-            GroupBatch = false
+            GroupBatch = false  
             for ii = 1, batchSize do
                 progressBar.step()
                                 
@@ -505,8 +516,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 local curTrainIdx = trainingIdxs[_idx_]
                 if useFunctionToGetTrainingIdx then
                     curTrainIdx = getTrainingIdx()
+                    CurIdx = curTrainIdx
                 end
-                
+                   
                 T = trainInputs
                 input = trainInputs[curTrainIdx]    
                 --input_copy = input:clone()
@@ -533,8 +545,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 if resizeInputToVector then           -- even if model already reshapes input, 
                     input = input:resize(nInputFeats)  -- model:backward needs vector for simple networks
                 end
-                    Model_toTrain = model_toTrain
-
+                    
+                Model_toTrain = model_toTrain
+                Crit = criterion
 
                 local output = model_toTrain:forward(input)
                 local nOutputsThisTime = output:numel()                
@@ -558,11 +571,6 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 --mattorch.save('test5.mat', {x=input_copy:double(), x1 = input[1]:double(), x2 = input[2]:double(), t = target:double(), v=target_copy:double(), tmod=Tmod:double()})
     
                 
-                if trainingOpts.useOutputAndTarget then
-                    trainingOpts.useOutputAndTarget(output, target, curTrainIdx)
-                end
-                    
-    
     
                 --allOutputs = allOutputs or {}
                 --table.insert(allOutputs, output:clone())
@@ -585,27 +593,27 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 -- we can adjust the heatmap targets so the bumps get successively narrower over the course of training
                 if targetsDependOnEpoch then
                     --tic() 
-                    target = targetFunction(curTrainIdx, curEpoch)
+                    target = targetFunction(curTrainIdx, curEpochIdx)
                     --print( toc() )
                     
                     trainingOutputs[curTrainIdx] = target
                 end
-                
+                --error('!')
                 
                 if torch.typename(criterion) == 'nn.WeightedMSECriterion'  then
                 
                     if criterion.MSEWeightsDependOnTarget then
                         -- adjust the weights of the MSE criterion for this specific target (to emphasize the bumps more than the flat parts)
                         
-                        if targetsDependOnEpoch and weightsFunctionEpoch ~= curEpoch then
+                        if targetsDependOnEpoch and weightsFunctionEpoch ~= curEpochIdx then
                             -- the MSEWeightsFunction depends on the statisics of the targets. if these have changed, have to adjust the function
-                            weightsFunctionEpoch = curEpoch 
+                            weightsFunctionEpoch = curEpochIdx 
                             
                             local a,b = getWeightScaleParams(trainingOutputs)
                             
                             --local weights = t*a + b
                             --Weights = weights
-                            cprintf.Cyan('\nUpdating weighted MSE criterion, epoch  %d : a = %.2f, b = %.2f\n', curEpoch, a, b)
+                            cprintf.Cyan('\nUpdating weighted MSE criterion, epoch  %d : a = %.2f, b = %.2f\n', curEpochIdx, a, b)
                             
                             criterion.MSEWeightsFunction = function(t)
                                 return t * a + b
@@ -613,7 +621,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                             
                         end
                         
-                        
+                        if criterion.MSEUpdateWeightsFunction then
+                            criterion.MSEUpdateWeightsFunction(curEpochIdx, _idx_)
+                        end
                         criterion.weight = criterion.MSEWeightsFunction(target)
                         --curTarget = 
                     elseif criterion.MSEWeightsDependOnTargetAndOutput then
@@ -630,6 +640,13 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 end
                   
                 Criterion_use = criterion
+            
+            
+                if trainingOpts.useOutputAndTarget then
+                    trainingOpts.useOutputAndTarget(output, target, curTrainIdx, criterion)
+                end
+                    
+    
             
             --[[
                 local extraLoss 
@@ -654,20 +671,21 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 loss = loss + extraLoss
                 if _idx_ <= 10 then
                     --cprintf.Red('Loss = %.10f. Output[1] = %.10f. W[1] = %.10f. P = %.10f\n', 
-                      --  ExtraLoss, Output[1], firstWeightVal( findModuleOfType(model_struct.model, 'linear', 1) ), modelP:sum()  );
+
+                      --  ExtraLoss, Output:view(-1)[1], firstWeightVal( findModuleOfType(model_struct.model, 'linear', 1) ), modelP:sum()  );
                     
                     --progressBar.printf('.')
                 end
-                if _idx_ == 10 then
-                    --error('!')
+                if curEpochIdx == 7 then
                 
                 end
                 --model_toTrain:backward(input, criterion:backward(output, target))
                
                 if trainingClassifier then
-                    trainConfusionMtx:add(output,target)          
+                    trainConfusionMtx:add(output:view(-1),target)          
                 end
                 
+                --error('!')
                 
                
                 showOutputAverages = false
@@ -813,7 +831,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         local loss = 0
             
         for j = 1, nTrainingSamples/batchSize do
-                    
+                    --cprintf.Cyan('Got HERE!')
             local _,fs = optim.sgd_auto(feval,parameters,trainingLogger.sgd_config)
             --allLoss[j] = fs[1]
                        
@@ -871,16 +889,17 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     while continueTraining do
         if criterion_firstEpoch then
             --nEpochsDoFirstOne = 1
-            if nEpochsDone == 0 or nEpochsDone == 1 then
+            curEpochIdx = nEpochsDone+1
+            if curEpochIdx <= nEpochsFirstCriterion then
                 criterion = criterion_firstEpoch
-                cprintf.cyan('Epoch #%d : using special criterion : %s\n', nEpochsDone+1, tostring(criterion))
-            elseif nEpochsDone >= 2 then
+                cprintf.cyan('Epoch #%d : Using special criterion : %s\n', curEpochIdx, tostring(criterion))
+            elseif curEpochIdx > nEpochsFirstCriterion  then
                 criterion = model_struct.criterion
-                cprintf.cyan('Epoch #%d : switching to using this criterion for the remaining epochs : %s\n', nEpochsDone+1, tostring(criterion))
+                cprintf.cyan('Epoch #%d : Using this criterion for the remaining epochs : %s\n', curEpochIdx, tostring(criterion))
             end
         end
         
-        cprintf.Green('Starting Epoch %d with %s: ', nEpochsDone+1, trainingAlgorithm)
+        cprintf.Green('Starting Epoch %d with %s: ', curEpochIdx, trainingAlgorithm)
         io.flush()
         
         local startTime = os.time()
@@ -1030,7 +1049,16 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         if trainingOpts.SAVE_TRAINING then
             tic()
             io.write(string.format('[Saving...' ))
+            --cleanModel(model_struct)
+            --convertModelToFloat(model_struct)
+            
             trainingLogger:saveToFile()
+            --cprintf.Red('Not Saving\n');
+            
+            if trainOnGPU then
+              --  model_toTrain:cuda()
+            end
+            
             local t_elapsed = toc()
             io.write(string.format('done:%s]', sec2hms(t_elapsed)))
             
@@ -1097,6 +1125,38 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         end
 
         io.write('\n')
+        
+        if trainingOpts.saveHeatmapsAfterEachEpoch then
+            reprocessInputsForTraining = false
+            
+            for i = 1,2 do
+                fn_base = trainingOpts.outputHeatmapsFiles[i]
+                if i == 1 then
+                    nm = 'training' 
+                    dataset = trainData
+                elseif i == 2 then
+                    nm = 'testing'
+                    dataset = testData
+                end
+                fn = string.gsub(fn_base, '.mat', '__' .. nEpochsDone .. '.mat')
+                
+                cprintf.Cyan('Generating %s heatmaps --> %s\n', nm, fn);
+            
+                outputHeatmaps_tmp = generateOutputHeatmapsForBatch(model_struct, dataset.inputMatrix, trainingOpts.reprocessInputsAndTargets)
+                
+                S_heatmaps = {outputHeatmaps = heatmap2int(outputHeatmaps_tmp ), targetHeatmaps = heatmap2int (dataset.outputTargets), 
+                                outputMatrix   = dataset.outputMatrix:float() }
+        
+                paths.verifyFolderExists(fn, true) -- if doesn't exist, create it now                        
+                matio.save(fn, S_heatmaps)
+            end
+                
+            reprocessInputsForTraining = true;
+            
+        end
+        
+        
+        
         do
             --error('!')
         end
