@@ -430,7 +430,9 @@ stringAndNumber = function(strWithNum)
     return strWithNum, nil
     --]]
     
-    local idx_firstNum, idx_lastNum = string.find(strWithNum, '%d+')
+    -- %d = digit
+    -- %- = negative sign
+    local idx_firstNum, idx_lastNum = string.find(strWithNum, '%-?%d+')
     if not idx_firstNum then
         return strWithNum, nil
     else

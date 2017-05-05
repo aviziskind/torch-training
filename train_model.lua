@@ -38,7 +38,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local progressBar_nStars = 50
     local continueTraining = true
     local reasonToStopTraining
-    local nEpochsDone = 0
+    local epoch_id = 1
     local batchSize = trainingOpts.BATCH_SIZE or 1
     local groupBatch = model_struct.parameters.convFunction and string.find(model_struct.parameters.convFunction, 'CUDA')
     local trainOnGPU = model_struct.parameters.trainOnGPU or trainingOpts.trainOnGPU
@@ -84,10 +84,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     
     local reprocessInputs = trainingOpts.reprocessInputs
-    cprintf.Red('Have reprocessInputs = %s\n', reprocessInputs ~= nil)
+    print( ('Have reprocessInputs = ' .. tostring(reprocessInputs ~= nil) ) )
     
     local reprocessInputsAndTargets = trainingOpts.reprocessInputsAndTargets
-    cprintf.Red('Have reprocessInputsAndTargets = %s\n', reprocessInputsAndTargets ~= nil)
+    print( ('Have reprocessInputsAndTargets = ' .. tostring(reprocessInputsAndTargets ~= nil) ) )
     
     local targetsDependOnEpoch = trainingOpts.targetFunction ~= nil
     local targetFunction = trainingOpts.targetFunction
@@ -131,8 +131,9 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     local trainingLogger = optim.TrainingLogger(trainingOpts)    
     trainingLogger:setFile(torchLogFile)
+    
         
-    local curEpochIdx
+    --local curEpochIdx = 1
 
     local sgd_config_default = {
         learningRate = 1e-3,
@@ -188,7 +189,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         
     end
     
-    --T = trainingLogger
+    TL = trainingLogger
     useOldFile = (not redoTrainingAlways) and trainingLogger:haveFile()  and not fileTooOld
     --print(useOldFile, trainingLogger:haveFile())
 
@@ -203,6 +204,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         end
         
     end
+    
+    
     if trainingLogger_loaded then
         
         trainingLogger = trainingLogger_loaded
@@ -215,7 +218,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         ---[[
         --]]
         
-        nEpochsDone      = trainingLogger.nEpochs
+        epoch_id      = trainingLogger.nEpochs + 1
         model_struct     = trainingLogger.model_struct
         if model_struct.sampleJointErrors and useFunctionToGetTrainingIdx then
             getTrainingIdx(model_struct.sampleJointErrors)
@@ -227,13 +230,20 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         local prev_testErr_pct = trainingLogger:currentTestErr()
         
         
-        io.write(string.format('   Currently at epoch %d: Cost = %.4f.', nEpochsDone, prev_train_loss));
+        io.write(string.format('   Currently at epoch %d: Cost = %.4f.', epoch_id, prev_train_loss));
         if showErr then
-            io.write(string.format('TrainErr = %.2f. TestErr = %.1f', prev_trainErr_pct, prev_testErr_pct))
+            io.write(string.format('TrainErr = %.3f. TestErr = %.3f', prev_trainErr_pct, prev_testErr_pct))
         end
         io.write('\n')
         
         continueTraining, trainingAlgorithm, reasonToStopTraining = trainingLogger:continue()
+        
+        
+        if continueTraining and trainingOpts.shouldBeCompletedTraining then
+            print(continueTraining, trainingAlgorithm, reasonToStopTraining)
+            error('Should have completed training!!')
+        end
+        
         
         logger_open_mode = iff(paths.filep(csvLogFile), 'append', 'new')
         
@@ -262,6 +272,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     if not continueTraining then   
         print(string.format('Training is already complete: \n%s', reasonToStopTraining))
         return model_struct
+    else
+        print(string.format('Training is not yet complete: \n%s', reasonToStopTraining))
     end
    
       -- print('Checking saved version from last time with just loaded and force-continued version, now')
@@ -321,7 +333,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     if onLaptop then
         maxSizeInput_MB = 2000 -- = ~1GB
     else
-        maxSizeInput_MB = 10000 -- = ~10GB
+        maxSizeInput_MB = 25000 -- = ~10GB
     end
     local usePreExtractedFeatures = false
     
@@ -593,7 +605,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 -- we can adjust the heatmap targets so the bumps get successively narrower over the course of training
                 if targetsDependOnEpoch then
                     --tic() 
-                    target = targetFunction(curTrainIdx, curEpochIdx)
+                    target = targetFunction(curTrainIdx, epoch_id)
                     --print( toc() )
                     
                     trainingOutputs[curTrainIdx] = target
@@ -605,15 +617,15 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                     if criterion.MSEWeightsDependOnTarget then
                         -- adjust the weights of the MSE criterion for this specific target (to emphasize the bumps more than the flat parts)
                         
-                        if targetsDependOnEpoch and weightsFunctionEpoch ~= curEpochIdx then
+                        if targetsDependOnEpoch and weightsFunctionEpoch ~= epoch_id then
                             -- the MSEWeightsFunction depends on the statisics of the targets. if these have changed, have to adjust the function
-                            weightsFunctionEpoch = curEpochIdx 
+                            weightsFunctionEpoch = epoch_id 
                             
                             local a,b = getWeightScaleParams(trainingOutputs)
                             
                             --local weights = t*a + b
                             --Weights = weights
-                            cprintf.Cyan('\nUpdating weighted MSE criterion, epoch  %d : a = %.2f, b = %.2f\n', curEpochIdx, a, b)
+                            cprintf.Cyan('\nUpdating weighted MSE criterion, epoch  %d : a = %.2f, b = %.2f\n', epoch_id, a, b)
                             
                             criterion.MSEWeightsFunction = function(t)
                                 return t * a + b
@@ -622,7 +634,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                         end
                         
                         if criterion.MSEUpdateWeightsFunction then
-                            criterion.MSEUpdateWeightsFunction(curEpochIdx, _idx_)
+                            criterion.MSEUpdateWeightsFunction(epoch_id, _idx_)
                         end
                         criterion.weight = criterion.MSEWeightsFunction(target)
                         --curTarget = 
@@ -675,9 +687,6 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                       --  ExtraLoss, Output:view(-1)[1], firstWeightVal( findModuleOfType(model_struct.model, 'linear', 1) ), modelP:sum()  );
                     
                     --progressBar.printf('.')
-                end
-                if curEpochIdx == 7 then
-                
                 end
                 --model_toTrain:backward(input, criterion:backward(output, target))
                
@@ -873,7 +882,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         io.write(string.format('   Quick check: Train Loss = %.4f, Test Loss = %.4f. ', current_train_loss, current_test_loss))
             
         if showErr then
-            io.write(string.format('TrainErr = %.2f. TestErr = %.1f', curr_trainErr_pct, curr_testErr_pct))
+            io.write(string.format('TrainErr = %.3f. TestErr = %.3f', curr_trainErr_pct, curr_testErr_pct))
         end
         io.write('\n')
             
@@ -889,17 +898,17 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     while continueTraining do
         if criterion_firstEpoch then
             --nEpochsDoFirstOne = 1
-            curEpochIdx = nEpochsDone+1
-            if curEpochIdx <= nEpochsFirstCriterion then
+            
+            if epoch_id <= nEpochsFirstCriterion then
                 criterion = criterion_firstEpoch
-                cprintf.cyan('Epoch #%d : Using special criterion : %s\n', curEpochIdx, tostring(criterion))
-            elseif curEpochIdx > nEpochsFirstCriterion  then
+                cprintf.cyan('Epoch #%d : Using special criterion : %s\n', epoch_id, tostring(criterion))
+            elseif epoch_id > nEpochsFirstCriterion  then
                 criterion = model_struct.criterion
-                cprintf.cyan('Epoch #%d : Using this criterion for the remaining epochs : %s\n', curEpochIdx, tostring(criterion))
+                cprintf.cyan('Epoch #%d : Using this criterion for the remaining epochs : %s\n', epoch_id, tostring(criterion))
             end
         end
         
-        cprintf.Green('Starting Epoch %d with %s: ', curEpochIdx, trainingAlgorithm)
+        cprintf.Green('Starting Epoch %d with %s: ', epoch_id, trainingAlgorithm)
         io.flush()
         
         local startTime = os.time()
@@ -952,13 +961,14 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         end
 
 
-        nEpochsDone = nEpochsDone + 1;
+      
         
      
         
         
             local t_elapsed_sec = 0
             local trainErr_pct_change_pct = (curr_trainErr_pct - prev_trainErr_pct)/prev_trainErr_pct*100 
+            local testErr_pct_change_pct  = (curr_testErr_pct - prev_testErr_pct)/prev_testErr_pct*100 
             prev_trainErr_pct = curr_trainErr_pct
             
             if haveTestData then
@@ -1013,8 +1023,8 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         --io.write('[print]')
         
         --io.write('[add\n');
-        
-        trainingLogger:add(nEpochsDone, model_struct, current_train_loss, curr_trainErr_pct, curr_testErr_pct, timeForThisEpoch)
+        printf(' epoch id == %d\n', epoch_id)
+        trainingLogger:add(epoch_id, model_struct, current_train_loss, curr_trainErr_pct, curr_testErr_pct, timeForThisEpoch)
         --io.write(']')
         
         
@@ -1039,7 +1049,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             io.write(string.format('   Quick check: TrainLoss = %.4f. TestLoss = %.4f. ', 
                                     current_train_loss_after, current_test_loss_after))        
             if showErr then
-                io.write(string.format('TrainErr = %.2f. TestErr = %.1f', curr_trainErr_pct_after, curr_testErr_pct_after))        
+                io.write(string.format('TrainErr = %.3f. TestErr = %.3f', curr_trainErr_pct_after, curr_testErr_pct_after))        
             end
             io.write('\n')
         end
@@ -1062,7 +1072,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
             local t_elapsed = toc()
             io.write(string.format('done:%s]', sec2hms(t_elapsed)))
             
-            logger:add{['Epoch'] = nEpochsDone}        
+            logger:add{['Epoch'] = epoch_id}        
             logger:add{['Train Cost'] = current_train_loss}
             logger:add{['Test  Cost'] = current_test_loss}
             if haveSecondTestData then
@@ -1093,12 +1103,12 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         end
         
         io.write(string.format('   after epoch %d: TrainCost = %.4f%s (%+.2f%%). TestCost = %.4f%s (%+.2f%%)', 
-                nEpochsDone, current_train_loss, current_train_loss_per_pixel_str, train_loss_change_pct, 
+                epoch_id, current_train_loss, current_train_loss_per_pixel_str, train_loss_change_pct, 
                               current_test_loss, current_test_loss_per_pixel_str, test_loss_change_pct ))
 
         if showErr then
-            io.write(string.format('TrainErr = %.2f (%+.2f%%). TestErr = %.1f', 
-                        curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct ))
+            io.write(string.format('TrainErr = %.3f (%+.2f%%). TestErr = %.3f  (%+.2f%%)', 
+                        curr_trainErr_pct, trainErr_pct_change_pct, curr_testErr_pct, testErr_pct_change_pct ))
         end
         io.write(string.format(' [took %s]\n', sec2hms(timeForThisEpoch_tot)))
 
@@ -1138,7 +1148,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                     nm = 'testing'
                     dataset = testData
                 end
-                fn = string.gsub(fn_base, '.mat', '__' .. nEpochsDone .. '.mat')
+                fn = string.gsub(fn_base, '.mat', '__' .. epoch_id .. '.mat')
                 
                 cprintf.Cyan('Generating %s heatmaps --> %s\n', nm, fn);
             
@@ -1163,6 +1173,14 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         if not continueTraining then
             io.write(string.format('Stopped training : %s\n', reasonToStopTraining))
         end
+        
+        -- check for signal to error out & restart!
+        checkForErrorSignal()
+        
+         
+         
+        epoch_id = epoch_id + 1;
+        
    
     end
 
@@ -1522,6 +1540,24 @@ cost2dist = function(cost, imageSize)
 end
 
 
-
+checkForErrorSignal = function()
+    if lettersData_dir and timeStarted then
+        local stop_fname = lettersData_dir .. 'stop'
+        if paths.filep(stop_fname) and paths.filedate(stop_fname) > timeStarted then
+            
+            io.write(string.format('Stop file signal date : (%s) \nis later than we started (%s)', 
+                    os.date('%x %X', paths.filedate(stop_fname)), os.date('%x %X', timeStarted) ) )
+                    
+            local nSecSleep = (torch.random() % 5) + 15
+            printf('Pausing for %d seconds ...', nSecSleep);
+            io.flush()
+            sys.sleep(nSecSleep)
+            print('Aborting ...!')
+            os.exit()
+        end
+        
+    end
+        
+end
 
 

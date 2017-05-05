@@ -123,7 +123,7 @@ end
 
 function loadFile(filename, deleteIfCantLoad)
     local S = nil
-    local maxNTries = 3;
+    local maxNTries = 3
     
     --[[
     if skip then
@@ -145,9 +145,9 @@ function loadFile(filename, deleteIfCantLoad)
             io.write(string.format('Status = "%s"\n', result))
             if (result == 'stop') or string.find(result, 'interrupted!') then
                 print('Received stop signal from user. Aborting....');
-                error('Stop')
+                error('Aborted by user')
             end
-            local sec_wait = 1 + math.modf(torch.random(),3)
+            local sec_wait = 3 + (torch.random() % 10)
             print(string.format('Load failed, trying again in %s seconds', sec_wait))
             sys.sleep(sec_wait)
             nTries = nTries + 1

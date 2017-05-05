@@ -290,8 +290,36 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
                 local doMaxPooling = (type(poolType_thisLayer) == 'string') and (string.upper(poolType_thisLayer) == 'MAX')
                 local poolingModule = nil
+                
+
                 local kW, kH = poolSizes[layer_i],   poolSizes[layer_i]
                 local dW, dH = poolStrides[layer_i], poolStrides[layer_i]
+                
+                if networkOpts.fullImagePooling and layer_i == nConvLayers then
+                    
+                    inputH = nOut_conv_h[layer_i]
+                    inputW = nOut_conv_w[layer_i]
+                    if (kH < nOut_conv_h[layer_i]  or kW < nOut_conv_w[layer_i]) then
+                        
+                        cprintf.Green('Full Image Pooling : final max pooling layer (%d x %d) is not big enough to cover its inputs. Expanding to (%d x %d) \n', kH, kW, inputH, inputW);
+                        kH = inputH
+                        dH = inputH
+                        kW = inputW
+                        dW = inputW
+                        error('!') -- error because this leads to a problem with file labeling. rather than have the pooling size increase automatically
+                                    -- specify it as it needs to be, or (for rectangular inputs) as too large, and the pooling size will shrink
+                                    -- if it needs to .
+                    
+                    else
+                            cprintf.green('Full Image Pooling : final max pooling layer (%d x %d) is sufficient to cover its inputs (%d x %d)\n',
+                kH, kW, inputH, inputW);
+    
+                    end
+
+                
+                end
+            
+                
 
                 if useCUDAmodules and convFunction == 'SpatialConvolutionCUDA' then
                     if doMaxPooling then
@@ -317,48 +345,82 @@ generateModel = function(inputStats, networkOpts, letterOpts)
                 end
                 assert(poolStrides[layer_i] <= poolSizes[layer_i])
 
-                nOut_pool_h[layer_i] = math.floor( (nOut_conv_h[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
-                nOut_pool_w[layer_i] = math.floor( (nOut_conv_w[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
-
-                local nCovered_pool_h = (nOut_pool_h[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
-                local nCovered_pool_w = (nOut_pool_w[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
-
-                local dropped_pixels_h = nOut_conv_h[layer_i]  - nCovered_pool_h
-                local dropped_pixels_w = nOut_conv_w[layer_i]  - nCovered_pool_w
-
-                if (dropped_pixels_h > 0 or dropped_pixels_w > 0) then
-                    if zeroPadForPooling then 
-                        nOut_pool_h[layer_i] = math.ceil( (nOut_conv_h[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
-                        nOut_pool_w[layer_i] = math.ceil( (nOut_conv_w[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
-
-                        local nCovered_pool_h_ext = (nOut_pool_h[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
-                        local nCovered_pool_w_ext = (nOut_pool_w[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
-
-                        local nPad_h = nCovered_pool_h_ext - nOut_conv_h[layer_i];
-                        local nPad_w = nCovered_pool_w_ext - nOut_conv_w[layer_i];
-
-                        local padTop,  padBottom = math.splitInTwo(nPad_w)
-                        local padLeft, padRight  = math.splitInTwo(nPad_h)
-                        --local padTop,  padBottom = nPad_h, 0
-                        --local padLeft, padRight  = nPad_w, 0
-                        local zeroPaddingModule = nn.SpatialZeroPadding(padLeft, padRight, padTop, padBottom)
-                        --print(string.format('   output of layer %d : %dx%d\n', layer_i, nOut_pool_h[layer_i], nOut_pool_w[layer_i]))
-                        --print(string.format('  >> Warning : Pooling in layer %d would drop %d from the height and %d from the width.',
-                        --      layer_i, dropped_pixels_h, dropped_pixels_w))
-                        --print(string.format('  >> So we are adding %d x %d of zero padding [L%d, R%d, T%d, B%d] before adding the pooling module',
-                        --      nPad_h, nPad_w,padLeft, padRight, padTop, padBottom))
-
-                        feat_extractor:add(zeroPaddingModule)
-
-
-                        nOut_pool_h[layer_i] = math.ceil( (nOut_conv_h[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
-                        nOut_pool_w[layer_i] = math.ceil( (nOut_conv_w[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
-
-                    else
-                        error(string.format('Warning : Pooling in layer %d drops %d from the height and %d from the width', 
-                                layer_i, dropped_pixels_h, dropped_pixels_w))
+                --local round_func = math.floor
+                local useCeilModeInsteadOfZeroPadding = true
+                if useCeilModeInsteadOfZeroPadding then
+                    --round_func = math.ceil
+                    
+                
+                    nOut_pool_w[layer_i] = math.ceil( (nOut_conv_w[layer_i] - kW)/dW) + 1
+                    nOut_pool_h[layer_i] = math.ceil( (nOut_conv_h[layer_i] - kH)/dH) + 1
+                
+                    --if networkOpts.fullImagePooling then
+                    
+                    if layer_i == nConvLayers then
+                        if kW > nOut_conv_w[layer_i]  or kH > nOut_conv_h[layer_i] then
+                        
+                            cprintf.Magenta('Final max pooling layer (%d x %d) is too big for its inputs (%d x %d). Reducing size to match inputs...\n',
+                                kH, kW, nOut_conv_h[layer_i], nOut_conv_w[layer_i])
+                            
+                            kW = nOut_conv_w[layer_i] 
+                            kH = nOut_conv_h[layer_i]
+                            dW = kW
+                            dH = kH
+                            poolingModule = nn.SpatialMaxPooling( kW, kH, dW, dH )
+                        end
+                        
                     end
+                    
+                
+                    poolingModule:ceil()
+                
+                else
+                    poolingModule:floor() -- this is the default
 
+                    nOut_pool_w[layer_i] = math.floor( (nOut_conv_w[layer_i] - kW)/dW) + 1
+                    nOut_pool_h[layer_i] = math.floor( (nOut_conv_h[layer_i] - kH)/dH) + 1
+
+                    local nCovered_pool_w = (nOut_pool_w[layer_i] - 1) * dW + kW
+                    local nCovered_pool_h = (nOut_pool_h[layer_i] - 1) * dH + kH
+
+                    local dropped_pixels_w = nOut_conv_w[layer_i]  - nCovered_pool_w
+                    local dropped_pixels_h = nOut_conv_h[layer_i]  - nCovered_pool_h
+
+                    if (dropped_pixels_h > 0 or dropped_pixels_w > 0) then
+                        if zeroPadForPooling then 
+                            nOut_pool_h[layer_i] = math.ceil( (nOut_conv_h[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
+                            nOut_pool_w[layer_i] = math.ceil( (nOut_conv_w[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
+
+                            local nCovered_pool_h_ext = (nOut_pool_h[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
+                            local nCovered_pool_w_ext = (nOut_pool_w[layer_i] - 1) * poolStrides[layer_i] + poolSizes[layer_i]
+
+                            local nPad_h = nCovered_pool_h_ext - nOut_conv_h[layer_i];
+                            local nPad_w = nCovered_pool_w_ext - nOut_conv_w[layer_i];
+
+                            local padTop,  padBottom = math.splitInTwo(nPad_w)
+                            local padLeft, padRight  = math.splitInTwo(nPad_h)
+                            --local padTop,  padBottom = nPad_h, 0
+                            --local padLeft, padRight  = nPad_w, 0
+                            local zeroPaddingModule = nn.SpatialZeroPadding(padLeft, padRight, padTop, padBottom)
+                            --print(string.format('   output of layer %d : %dx%d\n', layer_i, nOut_pool_h[layer_i], nOut_pool_w[layer_i]))
+                            --print(string.format('  >> Warning : Pooling in layer %d would drop %d from the height and %d from the width.',
+                            --      layer_i, dropped_pixels_h, dropped_pixels_w))
+                            --print(string.format('  >> So we are adding %d x %d of zero padding [L%d, R%d, T%d, B%d] before adding the pooling module',
+                            --      nPad_h, nPad_w,padLeft, padRight, padTop, padBottom))
+
+                            feat_extractor:add(zeroPaddingModule)
+
+
+                            nOut_pool_h[layer_i] = math.ceil( (nOut_conv_h[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
+                            nOut_pool_w[layer_i] = math.ceil( (nOut_conv_w[layer_i] - poolSizes[layer_i])/poolStrides[layer_i]) + 1
+
+                        else
+                            error(string.format('Warning : Pooling in layer %d drops %d from the height and %d from the width', 
+                                    layer_i, dropped_pixels_h, dropped_pixels_w))
+                        end
+
+                    end
+            
                 end
 
 
@@ -878,7 +940,7 @@ getModelSequence = function(model)
     local seq = {}
     local nModules = #fullModel.modules
     for idx = 1,nModules do
-        table.insert(seq, torch.typename(fullModel.modules[idx]))
+        table.insert(seq, string.lower( torch.typename(fullModel.modules[idx]) ) )
     end
 
     return seq
@@ -893,6 +955,7 @@ getModuleIndex = function(model, moduleToFind_full, errorIfNotFound)
     moduleToFind = string.lower ( string.gsub(moduleToFind, 'nn.', '') )
 
     local seq = getModelSequence(model)
+    Seq = seq
     local nModules = #seq
     local module_idx
 
@@ -929,7 +992,7 @@ getModuleIndex = function(model, moduleToFind_full, errorIfNotFound)
         module_idx = conv_indices[occurence]
 
     else 
-        local module_str = 'nn.' .. string.titleCase(moduleToFind)
+        local module_str = 'nn.' .. moduleToFind
 
         local linear_indices = table.find(seq, module_str, 'all')
         if #linear_indices == 0 then
@@ -952,8 +1015,8 @@ getModuleIndex = function(model, moduleToFind_full, errorIfNotFound)
         end
 
         if moduleToFind_orig == 'classifier' then
-            assert(seq[module_idx] == 'nn.Linear')
-            assert(seq[module_idx+1] == 'nn.LogSoftMax')
+            assert(seq[module_idx] == 'nn.linear')
+            assert(seq[module_idx+1] == 'nn.logsoftmax')
         end
 
     end
@@ -1006,15 +1069,16 @@ copyConvolutionalFiltersToNetwork = function (model_struct1, model_struct2)
         convLayer_idx = convLayer_idx + 1
 
     until (not net1_idx and not net2_idx)
-
+    print('completed copying')
 
 
 end
 
 
 
-areConvolutionalWeightsTheSame = function(model_struct1, model_struct2)
+areConvolutionalWeightsTheSame = function(model_struct1, model_struct2, maxLevel)
 
+    maxLevel = maxLevel or 2
     local full_model1 = getStreamlinedModel(model_struct1.model)
     local full_model2 = getStreamlinedModel(model_struct2.model)
 
@@ -1042,10 +1106,10 @@ areConvolutionalWeightsTheSame = function(model_struct1, model_struct2)
             if not torch.tensorsEqual(w1, w2) or not torch.tensorsEqual(b1, b2) then    
                 return false, val1, val2
             end
-
+            cprintf.green('conv filters & bias in layer %d are the same ...\n', convLayer_idx)
             convLayer_idx = convLayer_idx + 1
         end
-    until (not net1_idx and not net2_idx)
+    until (not net1_idx and not net2_idx or (maxLevel and convLayer_idx > maxLevel) )
 
     assert(val1 == val2)
     return true, val1, val2
@@ -1182,6 +1246,7 @@ end
 replaceClassifierLayer = function(model_struct, nOutputs)
 
     local full_model = getStreamlinedModel(model_struct.model)
+    FM = full_model
 
     local classifier_idx = getModuleIndex(full_model, 'classifier')
 
@@ -1307,6 +1372,64 @@ splitModelFromLayer = function(model_struct, splitLayer, splitAfterFlag)
     return model_struct
 
 
+end
+
+
+expandFinalPoolingLayerToCoverFullImage = function(model_struct, sampleInput)
+    
+    --cprintf.red("expandFinalPoolingLayerToCoverFullImage")
+    
+    full_model = getStreamlinedModel(model_struct.model)
+
+    last_pool_idx = getModuleIndex(full_model, 'SpatialMaxPooling-1')
+    lastPoolModule = full_model.modules[last_pool_idx]
+    curPoolH = lastPoolModule.kH
+    curPoolW = lastPoolModule.kW
+
+
+-- temporarily put everything until this layer into a temporary model. th
+    model_trunc = nn.Sequential()
+    for i = 1,last_pool_idx do
+        model_trunc:add( full_model.modules[i])
+    end
+    
+    model_trunc:forward(sampleInput)
+    
+    
+    inputToPoolingLayerSize = model_trunc.modules[last_pool_idx-1].output:size()
+    inputH = inputToPoolingLayerSize[2]
+    inputW = inputToPoolingLayerSize[3]
+    
+    if curPoolH >= inputH and curPoolW >= inputW then
+        cprintf.blue('Full Image Pooling : final max pooling layer (%d x %d) is sufficient to cover its inputs (%d x %d)\n',
+            curPoolH, curPoolW, inputH, inputW);
+        return model_struct
+    end
+        
+    cprintf.Blue('Full Image Pooling : final max pooling layer (%d x %d) is not big enough to cover its inputs. Expanding to (%d x %d) \n', curPoolH, curPoolW, inputH, inputW);
+    
+    
+    
+    full_model.modules[last_pool_idx].kH = inputH
+    full_model.modules[last_pool_idx].dH = inputH
+    full_model.modules[last_pool_idx].kW = inputW
+    full_model.modules[last_pool_idx].dW = inputW
+    
+    --test with the sample input to make sure it works:
+    full_model:forward(sampleInput)
+    
+    -- double check that the output of the final max pooling layer is 1x1
+    outputOfPoolingLayerSize = model_trunc.modules[last_pool_idx].output:size()
+    assert(outputOfPoolingLayerSize[2] == 1)
+    assert(outputOfPoolingLayerSize[3] == 1)
+    
+    
+    model_struct.model = full_model
+    
+    
+    return model_struct
+
+    
 end
 
 

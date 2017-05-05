@@ -11,10 +11,10 @@
         self.params = {}
         self.params.COST_CHANGE_FRAC_THRESH = 0.001  -- = 0.1%
         self.params.TRAIN_ERR_CHANGE_FRAC_THRESH = 0.001  -- = 0.1%
-        self.params.TEST_ERR_NEPOCHS_STOP_AFTER_MIN = 10
+        self.params.TEST_ERR_NEPOCHS_STOP_AFTER_MIN = 2
         self.params.MIN_EPOCHS = 10
         self.params.MAX_EPOCHS = 500
-        self.params.EXTRA_EPOCHS = 5 -- after satisfies stopping criteria -- do another few epochs
+        self.params.EXTRA_EPOCHS = 1 -- after satisfies stopping criteria -- do another few epochs
         self.params.SWITCH_TO_LBFGS_AT_END = false
         self.params.LBFGS_USE_REDUCED_SET_FIRST = false
         self.params.REQUIRE_COST_MINIMUM = false -- require cost function to reach local 
@@ -88,6 +88,7 @@
         
         if cost or trainErr or testErr or epochTrainingTime then
             self.nEpochs = epoch
+            S1 = self
             --print('epoch = ' .. epoch)
             
             if cost then
@@ -171,6 +172,7 @@
                     
         local cost_below_change_threshold, train_err_below_change_threshold, minTestError_epoch, test_err_stopped_decreasing
     
+        p.nEpochsAgoSatisfiedCriterion = 0;
                     
         if nEpochs > 1  then -- and self.trainingState == 'SGD' then
             self.dCost_frac = self.dCost_frac or {}
@@ -199,11 +201,18 @@
                 
                 train_err_below_change_threshold = (self.dTrainErr_frac[nEpochs] < p.TRAIN_ERR_CHANGE_FRAC_THRESH)
                 minTestError_epoch = self:epochOfMinTestError()
-                test_err_stopped_decreasing = (p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN > 0) 
-                                        and (nEpochs - minTestError_epoch) > p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN
+                test_err_stopped_decreasing = (p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN >= 0) 
+                                        and (nEpochs - minTestError_epoch > p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN)
+                                        
                 p.test_err_stopped_decreasing = test_err_stopped_decreasing
+                if test_err_stopped_decreasing then
+                    p.nEpochsAgoSatisfiedCriterion = nEpochs - minTestError_epoch - p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN
+                end
+                print(string.format('    [Min Test err epoch = %d. cur epoch = %d]. ', minTestError_epoch, nEpochs))
                 
         --end
+        --print('TEST_ERR_NEPOCHS_STOP_AFTER_MIN = ', p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN)
+        --print('test_err_stopped_decreasing = ', test_err_stopped_decreasing);
         
             --train_err_zero = self.trainErr[nEpochs] == 0
             --test_err_zero = self.testErr[nEpochs] == 0
@@ -271,6 +280,17 @@
                 
                 end
                 
+                
+                -- if test error stopped decreasing over last N epochs --> STOP
+                if not decided and test_err_stopped_decreasing then
+                    self.satisfiedStopCriterion = true
+                    self.reason = string.format('Test error hasnt improved since epoch %d (ie. %d epochs ago, > threshold of %d) ', 
+                        minTestError_epoch, nEpochs - minTestError_epoch, p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN )
+                    
+                    decided = true
+                end
+                
+                
                 -- if training error stopped decreasing --> STOP
                 if not decided and train_err_below_change_threshold then --and not p.REQUIRE_TRAINING_ERR_MINIMUM then
                     self.satisfiedStopCriterion = true
@@ -278,13 +298,6 @@
                     decided = true
                 end
           
-                -- if test error stopped decreasing over last N epochs --> STOP
-                if not decided and test_err_stopped_decreasing then
-                    self.satisfiedStopCriterion = true
-                    self.reason = string.format('Test error hasnt improved since epoch %d (ie. %d epochs ago, > threshold of %d) ', 
-                        minTestError_epoch, nEpochs - minTestError_epoch, p.TEST_ERR_NEPOCHS_STOP_AFTER_MIN )
-                    decided = true
-                end
           
                 --> training error still decreasing --> CONTINUE
                 if not decided and p.REQUIRE_TRAINING_ERR_MINIMUM and not 
@@ -341,6 +354,8 @@
         
         
         if self.satisfiedStopCriterion then
+            self.nExtraEpochs = math.max(self.nExtraEpochs, p.nEpochsAgoSatisfiedCriterion)
+            
             if self.trainingState == 'SGD' and p.SWITCH_TO_LBFGS_AT_END then
                 if p.LBFGS_USE_REDUCED_SET_FIRST then
                     self.trainingState = 'L-BFGS-reduced'
@@ -367,6 +382,7 @@
         end
         
         local contTraining = self.trainingState ~= 'DONE'
+        
         return contTraining, self.trainingState, self.reason
     end
     
@@ -418,25 +434,43 @@
         tic()
         io.write(string.format('Loading saved trained network from %s ...', paths.basename(self.filename)))
         local loaded_file = nil
-                
+		local maxNTries = 3
+		local nTries = 0
+		 
         local function loadSavedDataFromFile() 
             loaded_file = torch.load(self.filename)        
         end
-        local status, result = pcall(loadSavedDataFromFile)
-        
-        io.write(string.format('[took %d sec]\n', toc()))
+		
+		local status, result = false, nil
+		while (nTries < maxNTries) and (status == false) do
+		
+			status, result = pcall(loadSavedDataFromFile)
 
-        if not status then
-            print('Encountered the following error while loading the file : ')
-            print(result)
-            print('Starting from scratch....')
-            assert(string.find(result, 'read error') or string.find(result, 'table index is nil')) 
-            return nil
-        else
-            return loaded_file
-        end
-            
-        --return loaded_file
+			if not status then -- failed
+				io.write(string.format('Status = "%s"\n', result))
+				if (result == 'stop') or string.find(result, 'interrupted!') then
+					print('Received stop signal from user. Aborting....');
+					error('Aborted by user')
+				end
+				local sec_wait = 5 + ( torch.random() % 10 )
+				print(string.format('Load failed, trying again in %s seconds', sec_wait))
+				sys.sleep(sec_wait)
+				nTries = nTries + 1
+			end
+		
+		end
+		
+		if not status then
+			print('Encountered the following error while loading the file : ')
+			print(result)
+			print('Starting from scratch....')
+			assert(string.find(result, 'read error') or string.find(result, 'table index is nil')) 
+			return nil
+		else
+			io.write(string.format('[took %d sec]\n', toc()))
+			return loaded_file
+		end
+		
         
     end
     
