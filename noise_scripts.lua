@@ -82,7 +82,13 @@ getFilterStr = function(filt, wForWhite)
         error(string.format('Unknown filter type: %s ', filt.filterType))
     end
     
-    return filtStr .. normStr
+    
+    local radius_str = ''
+    if filt.radius then
+        radius_str = string.format('_rad%d', filt.radius)    
+    end
+    
+    return filtStr .. normStr .. radius_str
     
 
 end

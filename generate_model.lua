@@ -489,7 +489,7 @@ generateModel = function(inputStats, networkOpts, letterOpts)
 
         nUnitsInLastLayer = nOutputs_last
         -- fully-connected layers (if any)
-        print('nStatesFC', nStatesFC)
+        --print('nStatesFC', nStatesFC)
         if nFCLayers > 0 then
             for layer_i,nUnitsInThisLayer in ipairs(nStatesFC) do
 
@@ -603,6 +603,198 @@ generateModel = function(inputStats, networkOpts, letterOpts)
     return model_struct
 
 end
+
+
+
+
+getConvLayerSizes = function(inputStats, networkOpts, letterOpts)
+
+    --torch.manualSeed(123)
+    local nInputs = inputStats.nInputs
+    local height  = inputStats.height;        assert(height)
+    local width   = inputStats.width;         assert(width)
+    local nOutputs = inputStats.nClasses or inputStats.nOutputs;  assert(nOutputs)
+    local nPositions = inputStats.nPositions or 1
+
+    local nUnitsInLastLayer
+    local params = {}
+    
+    local defaultNetworkName = networkOpts.defaultNet
+    networkOpts = fixConvNetParams(networkOpts, defaultNetworkName)
+    --NetworkOpts = networkOpts
+
+    local nInputPlanes = nInputPlanes or 1 
+
+    local nStatesConv = networkOpts.nStatesConv
+    local nStatesFC   = networkOpts.nStatesFC
+    nStatesConv[0] = nInputPlanes
+    local nConvLayers = #nStatesConv
+    local nFCLayers = #nStatesFC
+    --nStates_copy2 = nStatesConv
+
+    --print(nStatesConv)
+    --local useConnectionTable_default = true
+    --local useConnectionTable_default = false
+    --local useConnectionTable = useConnectionTable_default and not trainOnGPU
+    --params.enforceStridePoolSizeEqual = trainOnGPU
+    local n = networkOpts
+
+    local convFunction,   fanin,   filtSizes,   doPooling,   poolSizes,   poolTypes,   poolStrides,   trainOnGPU = 
+    n.convFunction, n.fanin, n.filtSizes, n.doPooling, n.poolSizes, n.poolTypes, n.poolStrides, n.trainOnGPU
+
+    local doSpatSubtrNorm,   spatSubtrNormType,   spatSubtrNormWidth,   doSpatDivNorm,   spatDivNormType,   spatDivNormWidth = 
+    n.doSpatSubtrNorm, n.spatSubtrNormType, n.spatSubtrNormWidth, n.doSpatDivNorm, n.spatDivNormType, n.spatDivNormWidth
+
+    local zeroPadForPooling = n.zeroPadForPooling or true
+    local zeroPadForConvolutions = n.zeroPadForConvolutions or false
+
+    local convPs, fcPs
+
+    local nOut_conv_h = {}
+    local nOut_conv_w = {}
+    local nOut_pool_h,  nOut_pool_h_uncropped = {}
+    local nOut_pool_w,  nOut_pool_w_uncropped = {}
+    nOut_pool_h[0] = height
+    nOut_pool_w[0] = width
+
+    local tbl_layerSizes = {}
+
+    tbl_layerSizes[ 'input'] = nInputs
+    tbl_layerSizes[ 'input_str'] = nInputPlanes .. 'x(' .. height .. 'x' .. width .. ')'
+    tbl_layerSizes[ 'conv1_in'] = nInputs
+    tbl_layerSizes[ 'conv1_in_str'] = tbl_layerSizes[ 'input_str']
+
+    for layer_i = 1,nConvLayers do
+        -- 1. Convolutional layer
+        local kW, kH = filtSizes[layer_i], filtSizes[layer_i]
+        local dW, dH = 1, 1
+
+    
+        local nConvPaddingW, nConvPaddingH = 0,0
+        if zeroPadForConvolutions then
+            if type(zeroPadForConvolutions) == 'number' then
+                nConvPaddingW = zeroPadForConvolutions
+                nConvPaddingH = nConvPaddingW
+            elseif type(zeroPadForConvolutions) == 'boolean' and zeroPadForConvolutions == true then
+                nConvPaddingW = math.floor( (kW-1)/2 )
+                nConvPaddingH = math.floor( (kH-1)/2 )
+            end
+        end
+
+
+        nOut_conv_w[layer_i] = nOut_pool_w[layer_i-1] - filtSizes[layer_i] + 1  + nConvPaddingW*2
+        nOut_conv_h[layer_i] = nOut_pool_h[layer_i-1] - filtSizes[layer_i] + 1  + nConvPaddingH*2
+
+        
+        -- 2. Spatial pooling / sub-sampling
+        local poolType_thisLayer = poolTypes[layer_i]
+        if doPooling and not (poolType_thisLayer == 0) then
+            
+            local kW, kH = poolSizes[layer_i],   poolSizes[layer_i]
+            local dW, dH = poolStrides[layer_i], poolStrides[layer_i]
+            
+            if networkOpts.fullImagePooling and layer_i == nConvLayers then
+                
+                inputH = nOut_conv_h[layer_i]
+                inputW = nOut_conv_w[layer_i]
+                if (kH < nOut_conv_h[layer_i]  or kW < nOut_conv_w[layer_i]) then
+                    
+                    cprintf.Green('Full Image Pooling : final max pooling layer (%d x %d) is not big enough to cover its inputs. Expanding to (%d x %d) \n', kH, kW, inputH, inputW);
+                    kH = inputH
+                    dH = inputH
+                    kW = inputW
+                    dW = inputW
+                    error('!') -- error because this leads to a problem with file labeling. rather than have the pooling size increase automatically
+                                -- specify it as it needs to be, or (for rectangular inputs) as too large, and the pooling size will shrink
+                                -- if it needs to .
+                
+                else
+                end
+            
+            end
+                    
+
+            assert(poolStrides[layer_i] <= poolSizes[layer_i])
+
+            local useCeilModeInsteadOfZeroPadding = true
+            if useCeilModeInsteadOfZeroPadding then
+            
+                nOut_pool_w[layer_i] = math.ceil( (nOut_conv_w[layer_i] - kW)/dW) + 1
+                nOut_pool_h[layer_i] = math.ceil( (nOut_conv_h[layer_i] - kH)/dH) + 1
+            
+                
+                if layer_i == nConvLayers then
+                    if kW > nOut_conv_w[layer_i]  or kH > nOut_conv_h[layer_i] then
+                    
+                        --cprintf.Magenta('Final max pooling layer (%d x %d) is too big for its inputs (%d x %d). Reducing size to match inputs...\n',
+                            --kH, kW, nOut_conv_h[layer_i], nOut_conv_w[layer_i])
+                        
+                        kW = nOut_conv_w[layer_i] 
+                        kH = nOut_conv_h[layer_i]
+                        dW = kW
+                        dH = kH
+                        
+                    end
+                    
+                end
+                
+            
+            end
+            
+
+
+        else
+            nOut_pool_h[layer_i] = nOut_conv_h[layer_i]
+            nOut_pool_w[layer_i] = nOut_conv_w[layer_i]            
+        end
+
+        local nOutputs_thisLayer = nStatesConv[layer_i] * (nOut_pool_h[layer_i]*nOut_pool_w[layer_i])
+        local output_layer_str = nStatesConv[layer_i] .. 'x(' .. nOut_pool_h[layer_i] .. 'x' .. nOut_pool_w[layer_i] .. ')'
+        tbl_layerSizes[ 'conv' .. layer_i .. '_out'] = nOutputs_thisLayer
+        tbl_layerSizes[ 'conv' .. layer_i .. '_out_str'] = output_layer_str
+        if layer_i < nConvLayers then
+            tbl_layerSizes[ 'conv' .. layer_i+1 .. '_in'] = nOutputs_thisLayer 
+            tbl_layerSizes[ 'conv' .. layer_i+1 .. '_in_str'] = output_layer_str
+        else
+            tbl_layerSizes[ 'linear1_in'] = nOutputs_thisLayer 
+            tbl_layerSizes[ 'linear1_in_str'] = output_layer_str
+        end
+        
+    end
+    
+
+    local nOutputs_last = nStatesConv[nConvLayers] * (nOut_pool_h[nConvLayers]*nOut_pool_w[nConvLayers])
+
+
+    if nOutputs_last <= 0 then
+        error('No outputs for linear layers')
+    end
+
+
+
+
+    local reshape_module = nn.Reshape(nOutputs_last)
+
+
+    nUnitsInLastLayer = nOutputs_last
+    -- fully-connected layers (if any)
+    --print('nStatesFC', nStatesFC)
+    if nFCLayers > 0 then
+        for layer_i,nUnitsInThisLayer in ipairs(nStatesFC) do
+
+            nUnitsInLastLayer = nUnitsInThisLayer
+
+            tbl_layerSizes[ 'linear' .. layer_i .. '_out'] = nUnitsInThisLayer
+
+        end
+    end
+
+    tbl_layerSizes[ 'output' ] = nOutputs
+
+    return tbl_layerSizes
+
+end
+
 
 
 
@@ -1026,8 +1218,9 @@ end
 
 
 
-copyConvolutionalFiltersToNetwork = function (model_struct1, model_struct2)
+copyWeightsToNewNetwork = function (model_struct1, model_struct2, layer_prefix)
 
+    layer_prefix = layer_prefix or 'Conv'
     local full_model1 = getStreamlinedModel(model_struct1.model)
     local full_model2 = getStreamlinedModel(model_struct2.model)
     F1 = full_model1
@@ -1035,38 +1228,43 @@ copyConvolutionalFiltersToNetwork = function (model_struct1, model_struct2)
 
 
 
-    local net1_idx, net2_idx, convLayer_idx
-    convLayer_idx = 1
+    local net1_idx, net2_idx, layer_idx
+    layer_idx = 1
     repeat 
-        net1_idx = getModuleIndex(full_model1, 'Conv' .. convLayer_idx)
-        net2_idx = getModuleIndex(full_model2, 'Conv' .. convLayer_idx)
+        net1_idx = getModuleIndex(full_model1, layer_prefix .. layer_idx)
+        net2_idx = getModuleIndex(full_model2, layer_prefix .. layer_idx)
         if net1_idx and net2_idx then
-            local w1 = full_model1.modules[net1_idx].weight
-            local w2 = full_model2.modules[net2_idx].weight
+            if full_model1.modules[net1_idx].weight then
+                local w1 = full_model1.modules[net1_idx].weight
+                local w2 = full_model2.modules[net2_idx].weight
 
-            io.write(string.format('Copying Conv filter #%d from network1 (size=%s) to network2 (size=%s) \n', 
-                    convLayer_idx, tostring_inline(w1:size()), tostring_inline(w2:size()) ) )
-            --copyConvolutionalWeights(full_model1, net1_idx, full_model2, net2_idx)
-            w2:copy(w1)
+                io.write(string.format('Copying %s weights #%d from network1 (size=%s) to network2 (size=%s) \n', 
+                        layer_prefix, layer_idx, tostring_inline(w1:size()), tostring_inline(w2:size()) ) )
+                --copyConvolutionalWeights(full_model1, net1_idx, full_model2, net2_idx)
+                w2:copy(w1)
+                
+            end
 
-            local b1 = full_model1.modules[net1_idx].bias
-            local b2 = full_model2.modules[net2_idx].bias
+            if full_model1.modules[net1_idx].bias then
+                local b1 = full_model1.modules[net1_idx].bias
+                local b2 = full_model2.modules[net2_idx].bias
 
-            io.write(string.format('Copying bias #%d from network1 (size=%s) to network2 (size=%s) \n\n', 
-                    convLayer_idx, tostring_inline(b1:size()), tostring_inline(b2:size()) ) )
-            --copyConvolutionalWeights(full_model1, net1_idx, full_model2, net2_idx)
-            b2:copy(b1)
-            --full_model1.modules[net1_idx].weight:copy(full_model2.modules[net2_idx].weight)
-
+                io.write(string.format('Copying %s bias #%d from network1 (size=%s) to network2 (size=%s) \n\n', 
+                        layer_prefix, layer_idx, tostring_inline(b1:size()), tostring_inline(b2:size()) ) )
+                --copyConvolutionalWeights(full_model1, net1_idx, full_model2, net2_idx)
+                b2:copy(b1)
+                --full_model1.modules[net1_idx].weight:copy(full_model2.modules[net2_idx].weight)
+            end
+            
         elseif net1_idx and not net2_idx then
-            print('Network 1 has a Conv filter #' .. convLayer_idx .. ', but network #2 does not...')
+            print('Network 1 has a ' .. layer_prefix .. ' #' .. layer_idx .. ', but network #2 does not...')
 
         elseif not net1_idx and net2_idx then
-            print('Network 1 does not have a Conv filter #' .. convLayer_idx .. ', but network #2 does...')
+            print('Network 1 does not have a ' .. layer_prefix .. ' filter #' .. layer_idx .. ', but network #2 does...')
 
         end    
 
-        convLayer_idx = convLayer_idx + 1
+        layer_idx = layer_idx + 1
 
     until (not net1_idx and not net2_idx)
     print('completed copying')
@@ -1078,38 +1276,37 @@ end
 
 areConvolutionalWeightsTheSame = function(model_struct1, model_struct2, maxLevel)
 
-    maxLevel = maxLevel or 2
+    maxLevel = maxLevel or 1
     local full_model1 = getStreamlinedModel(model_struct1.model)
     local full_model2 = getStreamlinedModel(model_struct2.model)
 
 
-    local net1_idx, net2_idx, convLayer_idx
-    convLayer_idx = 1
+    local net1_idx, net2_idx, layer_idx
+    layer_idx = 1
 
     local val1,val2
 
 
     repeat 
-        net1_idx = getModuleIndex(full_model1, 'Conv' .. convLayer_idx)
-        net2_idx = getModuleIndex(full_model2, 'Conv' .. convLayer_idx)
+        net1_idx = getModuleIndex(full_model1, 'Conv' .. layer_idx)
+        net2_idx = getModuleIndex(full_model2, 'Conv' .. layer_idx)
         if net1_idx and net2_idx then
             local w1 = full_model1.modules[net1_idx].weight
             local w2 = full_model2.modules[net2_idx].weight
             local b1 = full_model1.modules[net1_idx].bias
             local b2 = full_model2.modules[net2_idx].bias
-
-
-            if not val1 then
-                val1 = w1:storage()[w1:storageOffset()]
-                val2 = w2:storage()[w2:storageOffset()]
-            end
+            
+            val1 = w1:storage()[w1:storageOffset()]
+            val2 = w2:storage()[w2:storageOffset()]
+            
             if not torch.tensorsEqual(w1, w2) or not torch.tensorsEqual(b1, b2) then    
+                cprintf.red('different values : %.15f vs %.15f (diff of %g)\n', val1, val2, val1-val2);
                 return false, val1, val2
             end
-            cprintf.green('conv filters & bias in layer %d are the same ...\n', convLayer_idx)
-            convLayer_idx = convLayer_idx + 1
+            cprintf.green('conv filters & bias in layer %d are the same ...\n', layer_idx)
+            layer_idx = layer_idx + 1
         end
-    until (not net1_idx and not net2_idx or (maxLevel and convLayer_idx > maxLevel) )
+    until (not net1_idx and not net2_idx or (maxLevel and layer_idx > maxLevel) )
 
     assert(val1 == val2)
     return true, val1, val2
@@ -1117,14 +1314,14 @@ areConvolutionalWeightsTheSame = function(model_struct1, model_struct2, maxLevel
 end
 
 
-firstConvolutionalWeightValue = function(model_struct1)
+firstConvolutionalWeightValue = function(model_struct)
     
-    full_model1 = getStreamlinedModel(model_struct1.model)    
+    local full_model = getStreamlinedModel(model_struct.model)    
 
-    local net1_idx = getModuleIndex(full_model1, 'Conv1')
+    local net1_idx = getModuleIndex(full_model, 'Conv1')
     if net1_idx then
-        local val1 = full_model1.modules[net1_idx].weight:storage()[1]
-        local val2 = full_model1.modules[net1_idx].weight:storage()[2]
+        local val1 = full_model.modules[net1_idx].weight:storage()[1]
+        local val2 = full_model.modules[net1_idx].weight:storage()[2]
         --return val1, val2        
         return val1
     end
@@ -1429,6 +1626,63 @@ expandFinalPoolingLayerToCoverFullImage = function(model_struct, sampleInput)
     
     return model_struct
 
+    
+end
+
+
+
+expandFirstLinearLayerToCoverLastPoolingLayer = function(model_struct, sampleInput)
+    
+    --cprintf.red("expandFinalPoolingLayerToCoverFullImage")
+    
+    full_model = getStreamlinedModel(model_struct.model)
+
+    last_pool_idx = getModuleIndex(full_model, 'SpatialMaxPooling-1')
+    lastPoolModule = full_model.modules[last_pool_idx]
+    curPoolH = lastPoolModule.kH
+    curPoolW = lastPoolModule.kW
+
+    first_linear_idx = getModuleIndex(full_model, 'Linear1')
+    assert(first_linear_idx - last_pool_idx  == 2) -- should be 1 reshape between them
+
+    firstLinearModule = full_model.modules[first_linear_idx];
+    first_linear_input_n = firstLinearModule.weight:size(2)
+    first_linear_output_n = firstLinearModule.weight:size(1)
+
+-- temporarily put everything until this layer into a temporary model. th
+    model_trunc = nn.Sequential()
+    for i = 1,last_pool_idx do
+        model_trunc:add( full_model.modules[i])
+    end
+    
+    model_trunc:forward(sampleInput)
+    
+    
+    finalPoolingLayerSize = model_trunc.output:size()
+    pooling_outputZ = finalPoolingLayerSize[1]
+    pooling_outputH = finalPoolingLayerSize[2]
+    pooling_outputW = finalPoolingLayerSize[3]
+    pooling_output_n = pooling_outputZ * pooling_outputH * pooling_outputW
+    
+    
+    if pooling_output_n == first_linear_input_n then
+        cprintf.blue('First Linear Layer (%d->%d) input size (%d) matches the output of the final max pooling layer (%d x %d x %d = %d)\n',
+            first_linear_input_n, first_linear_output_n, first_linear_input_n, pooling_outputZ, pooling_outputH, pooling_outputW, pooling_output_n);
+        return model_struct
+    end
+        
+    cprintf.Blue('First Linear Layer (%d->%d) input size (%d) does NOT match the output of the final max pooling layer (%d x %d x %d = %d).\n    Replacing the linear layer with size (%d -> %d).\n', 
+        first_linear_input_n, first_linear_output_n, first_linear_input_n, pooling_outputZ, pooling_outputH, pooling_outputW, pooling_output_n, pooling_output_n, first_linear_output_n )
+            
+    
+    full_model.modules[first_linear_idx] = nn.Linear(pooling_output_n, first_linear_output_n)
+    
+    --test with the sample input to make sure it works:
+    full_model:forward(sampleInput)
+            
+    model_struct.model = full_model
+    
+    return model_struct
     
 end
 
@@ -1882,6 +2136,36 @@ fixTopLayer = function ( topModule, nOutputs, nPositions )
 end
 
 
+convertNetworkFileToMatlabFormat = function(torch_model_file)
+    
+    
+    if string.find(torch_model_file, '*') or string.find(torch_model_file, '?') then
+        local path_name = paths.dirname(torch_model_file)
+        local file_names = dir(torch_model_file)
+        cprintf.Magenta("** Folder : %s\n", path_name)
+        for i,filename_i in ipairs(file_names) do
+            cprintf.magenta('* %2d/%2d %s\n', i, #file_names, filename_i)
+            convertNetworkFileToMatlabFormat(path_name .. '/' .. filename_i)
+        end
+        return
+    end
+    if not string.find(torch_model_file, '.t7') then
+        cprintf.red('Filename does not contain ".t7" extension');
+        return;
+    end
+    local mat_model_file = string.gsub(torch_model_file, '.t7', '.mat')
+    assert( mat_model_file ~= torch_model_file)
+    
+    S_torch = torch.load(torch_model_file)
+    S_mat = convertNetworkToMatlabFormat(S_torch.model_struct.model)
+    
+    paths.verifyFolderExists(mat_model_file)
+    mattorch.save(mat_model_file, S_mat)
+                    
+    cprintf.green('  => Saved network to : \n   %s\n-----\n', basename(mat_model_file) )
+    
+end
+
 convertNetworkToMatlabFormat = function(model)
 
     model =getStreamlinedModel(model)
@@ -2096,7 +2380,7 @@ convertNetworkToMatlabFormat = function(model)
                         elseif torch.isTensor(fieldVal) then
                             net[globFieldName] = module_i[fieldName]:double()
                         elseif type(fieldVal) == 'number' then
-                            net[globFieldName] = torch.DoubleTensor(fieldVal)
+                            net[globFieldName] = torch.DoubleTensor({fieldVal})
                         elseif torch.isStorage(fieldVal) then
                             local double_storage = torch.DoubleStorage(fieldVal:size()):copy(fieldVal)
                             net[globFieldName] = torch.DoubleTensor(double_storage)
@@ -2201,27 +2485,115 @@ nOutputsFromConvStages = function(networkOpts, imageSize)
 end
 
 
+cleanModelFile = function(model_file, justListFlag)
+    
+    skipGPU = true
+    date_th = 1496945181 - 2*24*60*60
+    
+    if string.find(model_file, '*') or string.find(model_file, '?') then
+        local nTotBefore = 0
+        local nTotAfter = 0
+        local path_name = paths.dirname(model_file)
+        local file_names = dir(model_file)
+        cprintf.Magenta("** Folder : %s [%d files matching the pattern]\n", path_name, #file_names)
+        for i,filename_i in ipairs(file_names) do
+            if skipGPU and (string.find(filename_i, 'GPU') or string.find(filename_i, 'Conv_c')) then
+                goto continue_to_clean_next_file
+            end
+            
+            local file_name_full = path_name .. '/' .. filename_i
+            local fSizeBefore = paths.filesize(file_name_full, 'MB')
+            local fdate = paths.filedate(file_name_full)
+            
+            
+            
+            if (fdate > date_th) then
+                --cprintf.red('file is new!');
+                goto continue_to_clean_next_file
+            else
+                cprintf.Magenta('File date : %.1f. Date th: %.1f [file is before threshold]\n', fdate, date_th )
+                   
+            end
+                
+            
+            local fSizeAfter = fSizeBefore
+            --printf('filename = %s [%d]\n', file_name_full, paths.filep(file_name_full) and 1 or 0 )
+            cprintf.magenta(' * %2d/%2d %s  [%.2f MB]\n', i, #file_names, filename_i, fSizeBefore)
+            if not justListFlag then
+                cleanModelFile(file_name_full)
+                fSizeAfter = paths.filesize(file_name_full, 'MB')
+            end
+            
+            nTotBefore = nTotBefore + fSizeBefore
+            nTotAfter = nTotAfter + fSizeAfter
+            
+            ::continue_to_clean_next_file::
+        end
+        
+        local pct_reduced_tot = (nTotBefore - nTotAfter)/nTotBefore*100
+        cprintf.Red('Total size of all model files: %.2f MB --> %.2f (reduced by %.2f%%)', nTotBefore, nTotAfter, pct_reduced_tot)
+        return
+    end
+    
+    if not string.find(model_file, '.t7') then
+        cprintf.red('Filename does not contain ".t7" extension');
+        return;
+    end
+    
+    local fileSizeBefore = paths.filesize(model_file, 'MB')
+    
+    local S_model = torch.load(model_file)
+        
+    cleanModel(S_model, 'grad')
+    
+    torch.save(model_file, S_model)
+    
+    local fileSizeAfter = paths.filesize(model_file, 'MB')
+    local pct_reduced = (fileSizeBefore - fileSizeAfter)/fileSizeBefore*100
+    cprintf.green('  => Cleaned network :    %s ', basename(model_file) ) 
+    cprintf.cyan('[%.1f MB -> %.1f MB] (reduced by %.2f%%)\n', fileSizeBefore, fileSizeAfter,  pct_reduced)
+    printf('-----\n')
+              
+              
+    
+    
+end
+
+
+
 
 cleanModel = function(model, fieldsToRemove, verbose)
     local m = getStreamlinedModel(model)
-    local fieldsToRemove_default = {'_input', 'finput', 'gradInput', 'fgradInput', 
-                                     'output', '_gradOutput', 'gradBias','gradWeight', 'buffer', 'indices'}
+    --local fieldsToRemove_default = {'_input', 'finput', 'gradInput', 'fgradInput', 
+      --                               'output', 'buffer', 'indices',      '_gradOutput',   
+                                    -- 'gradBias','gradWeight', }
+                                 
+    local fieldsToRemove_outputs              = {'output', 'buffer', 'indices', '_input', 'finput', 'gradInput', 'fgradInput',  '_gradOutput' }
+    local fieldsToRemove_outputs_and_gradient = {'output', 'buffer', 'indices', '_input', 'finput', 'gradInput', 'fgradInput',  '_gradOutput', 'gradBias','gradWeight' }
+    --local fieldsToRemove_default = {'output', 'buffer', 'indices', '_input', 'finput', 'gradInput', 'fgradInput',  '_gradOutput', 'gradBias','gradWeight' }
+    -- note: removed { 'gradBias','gradWeight' }  not needed if just doing feedforward, but get errors if try to retrain after these are removed.
              
-    fieldsToRemove = fieldsToRemove or fieldsToRemove_default
-
+    if fieldsToRemove == 'grad' then
+        fieldsToRemove = fieldsToRemove_outputs_and_gradient
+    end
+             
+    fieldsToRemove = fieldsToRemove or fieldsToRemove_outputs
+    
+    local nFieldsCleaned = 0
     local skipOutputOfParallelTable = true
     local t_type 
     
-    print('fieldsToRemove', fieldsToRemove)
+    --print('fieldsToRemove', fieldsToRemove)
 
-    cleanModule = function(mod)
+    local cleanModule = function(mod)
         if type(mod) ~= 'table' then
             return
         end
         
-        if mod.networkOpts and  mod.networkOpts.trainConfig and mod.networkOpts.trainConfig.dfdx  then
-            cprintf.Red('Removed dfdx\n')
-            mod.networkOpts.trainConfig.dfdx = nil
+        --if mod.networkOpts and  mod.networkOpts.trainConfig and mod.networkOpts.trainConfig.dfdx  then
+        if mod.dfdx then
+            cprintf.red('Removed dfdx\n')
+            mod.dfdx = nil
         end
         
         for fi, fld in ipairs(fieldsToRemove) do
@@ -2243,6 +2615,7 @@ cleanModel = function(model, fieldsToRemove, verbose)
                         printf('  cleaning %s\n', fld)    
                     end
                     mod[fld] = torch.Tensor():type(t_type)
+                    nFieldsCleaned = nFieldsCleaned + 1
                 end
             end
         end
@@ -2278,10 +2651,101 @@ cleanModel = function(model, fieldsToRemove, verbose)
     end
 
     cleanContainer(model)
+    
+    cprintf.yellow('[Cleaned %d fields:%d items]',  #fieldsToRemove, nFieldsCleaned);
 
 end
 
 
+
+
+
+
+
+
+
+
+
+
+fixEmptyGradients = function(model, verbose)
+    local m = getStreamlinedModel(model)
+    --local fieldsToRemove_default = {'_input', 'finput', 'gradInput', 'fgradInput', 
+      --                               'output', 'buffer', 'indices',      '_gradOutput',   
+                                    -- 'gradBias','gradWeight', }
+                                 
+    --local fieldsToRemove_default = {'output', 'buffer', 'indices', '_input', 'finput', 'gradInput', 'fgradInput',  '_gradOutput' }
+    --local fieldsToFix = {'gradBias','gradWeight'}
+    local gradFieldsToFix = {'bias','weight'}
+    -- note: removed { 'gradBias','gradWeight' }  not needed if just doing feedforward, but get errors if try to retrain after these are removed.
+             
+    --fieldsToRemove = fieldsToRemove or fieldsToRemove_default
+    local nGradsFixed = 0
+    local t_type 
+    
+    --print('fieldsToRemove', fieldsToRemove)
+
+    local fixModule = function(mod)
+        if type(mod) ~= 'table' then
+            return
+        end
+        
+        if mod.bias and mod.gradBias and mod.gradBias:nElement() == 0 then
+            
+            if not t_type and torch.isTensor(mod.bias) then
+                t_type = mod.bias:type()
+                printf('First field was a %s\n', t_type)
+            end
+            
+            mod.gradBias = torch.Tensor(mod.bias:size()):type(t_type)
+            nGradsFixed = nGradsFixed + 1
+        end
+        if mod.weight and mod.gradWeight and mod.gradWeight:nElement() == 0 then
+            
+            if not t_type and torch.isTensor(mod.bias) then
+                t_type = mod.bias:type()
+                printf('First field was a %s\n', t_type)
+            end
+            
+            mod.gradWeight = torch.Tensor(mod.weight:size()):type(t_type)
+            nGradsFixed = nGradsFixed + 1
+        end
+        
+    end
+
+
+    fixGradFieldsInContainer = function(container)
+        if type(container) ~= 'table' then
+            return
+        end
+        
+        fixModule(container)
+        if container.modules then
+            for mi, mod in ipairs(container.modules) do
+                if verbose then
+                    printf('Recursing for %s\n', torch.typename(mod))
+                end
+                fixGradFieldsInContainer(mod)
+                --if mod.modules then
+                 --   cleanModule(mod)
+                --end
+            end 
+        end
+        for mi, mod in pairs(container) do
+            --printf('Recursing for %s\n', torch.typename(mod))
+            --M = mod
+            --Mi = mi
+            fixGradFieldsInContainer(mod)
+            --if mod.modules then
+             --   cleanModule(mod)
+            --end
+        end 
+    end
+
+    fixGradFieldsInContainer(model)
+    
+    cprintf.yellow('[Reset %d empty gradients]', nGradsFixed);
+
+end
 
 expandPatchModelToHandleFullImages = function(model_struct, opt)
     opt = opt or {}

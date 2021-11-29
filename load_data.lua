@@ -2,10 +2,9 @@
 
 
 
-
+require 'mattorch'
 
 convertMatToTorch = function(matfile, torchfile, convertOpts)
-    require 'mattorch'
     
     local matfile_base = paths.basename(matfile)
     local torchfile_base = paths.basename(torchfile)
@@ -15,7 +14,6 @@ convertMatToTorch = function(matfile, torchfile, convertOpts)
     local S_mat = mattorch.load(matfile)    
    
     for k,v in pairs(S_mat) do 
-        
         if (getType(v) == 'torch.CharTensor') then
             local v_str = char2string(v)
             S_mat[k] = v_str
@@ -125,17 +123,29 @@ function loadFile(filename, deleteIfCantLoad)
     local S = nil
     local maxNTries = 3
     
-    --[[
-    if skip then
-        return torch.load( filename )
-    end
+    local skip = false
+    ---[[
+    --cprintf.Red('%s\n', filename)
     --]]
     
+    local isTorchFile = string.find(filename, '.t7') ~= nil
+    local isMatFile = string.find(filename, '.mat') ~= nil
+    assert( isMatFile ~= isTorchFile )
     
     
     local nTries = 0
     local function loadFileToS()
-        S = torch.load( filename )
+        if isTorchFile then
+            S = torch.load( filename )
+        elseif isMatFile then
+            S = mattorch.load( filename )
+            if S.inputMatrix then
+                S.inputMatrix = S.inputMatrix:float()
+            end
+            if S.labels then
+                S.labels = S.labels:float()
+            end
+        end
     end
     local status, result = false, nil
     while (nTries < maxNTries) and (status == false) do
@@ -148,17 +158,18 @@ function loadFile(filename, deleteIfCantLoad)
                 error('Aborted by user')
             end
             local sec_wait = 3 + (torch.random() % 10)
-            print(string.format('Load failed, trying again in %s seconds', sec_wait))
+            print(string.format('Loading %s failed, trying again in %s seconds', filename, sec_wait))
             sys.sleep(sec_wait)
             nTries = nTries + 1
         end
     end
     
     if status == false and deleteIfCantLoad then
-        io.write(string.format('Tried to load this torch file:\n   %s\nbut got this error:\n   %s\nDeleting file.\n', filename, result))    
-        os.execute(string.format('rm %s', filename_t7))
+        io.write(string.format('Tried to load this file:\n   %s\nbut got this error:\n   %s\nDeleting file.\n', filename, result))    
+        os.execute(string.format('rm %s', filename))
     end
         
+
     return S, result
 end
 
@@ -169,7 +180,10 @@ end
 convertAllFieldsToDouble = function(S)
     S = table.copy(S)
     for k,v in pairs(S) do
-        if (torch.typename(v) == 'torch.CharTensor') then
+        if type(v) == 'number' then
+            S[k] = torch.DoubleTensor{v}
+        
+        elseif (torch.typename(v) == 'torch.CharTensor') then
             S[k] = v:double()
             --S[k] = nil
         elseif (torch.typename(v) == 'torch.FloatTensor') or (torch.typename(v) == 'torch.ByteTensor') then

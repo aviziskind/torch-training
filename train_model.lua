@@ -84,10 +84,10 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     
     local reprocessInputs = trainingOpts.reprocessInputs
-    print( ('Have reprocessInputs = ' .. tostring(reprocessInputs ~= nil) ) )
+    --print( ('Have reprocessInputs = ' .. tostring(reprocessInputs ~= nil) ) )
     
     local reprocessInputsAndTargets = trainingOpts.reprocessInputsAndTargets
-    print( ('Have reprocessInputsAndTargets = ' .. tostring(reprocessInputsAndTargets ~= nil) ) )
+    --print( ('Have reprocessInputsAndTargets = ' .. tostring(reprocessInputsAndTargets ~= nil) ) )
     
     local targetsDependOnEpoch = trainingOpts.targetFunction ~= nil
     local targetFunction = trainingOpts.targetFunction
@@ -145,6 +145,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     
     trainingLogger.sgd_config = sgd_config
+    print('Training options : ');
     print(trainingLogger.sgd_config)
     local lineSearchFunc, lbfgs_func 
     
@@ -197,6 +198,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     if useOldFile then -- not redoTrainingAlways and trainingLogger:haveFile() then
         trainingLogger_loaded = trainingLogger:loadFromFile()
         
+       
         
         if trainingLogger_loaded and not trainingLogger_loaded.sgd_config then
             trainingLogger_loaded.sgd_config = sgd_config_default
@@ -227,7 +229,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
                 
         local prev_train_loss   = trainingLogger:currentLoss()
         local prev_trainErr_pct = trainingLogger:currentTrainErr()
-        local prev_testErr_pct = trainingLogger:currentTestErr()
+        local prev_testErr_pct  = trainingLogger:currentTestErr()
         
         
         io.write(string.format('   Currently at epoch %d: Cost = %.4f.', epoch_id, prev_train_loss));
@@ -316,6 +318,7 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     local trainingOutputs  = trainData[output_field]
     
     TrainData = trainData
+    TestData = testData
     F = output_field
     
     local orig_testInputs, nTestSamples, testingOutputs
@@ -349,12 +352,15 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     trainInputs = orig_trainInputs
     TrainInputs = trainInputs
     trainData_use = trainData
+    cprintf.blue('Training set size = %d. ', trainInputs:size(1))
     if haveTestData then
-        testInputs  = orig_trainInputs
+        testInputs  = orig_testInputs
         testData_use = testData
+        cprintf.blue('Test set size = %d\n', testInputs:size(1))
     end
+    printf('\n')
     
-    
+      
     if freezeFeatures then
         -- train only upper layers. pass inputs through lower layers to serve as new inputs
         print('Some layers are frozen : calculating new features ...')
@@ -475,8 +481,12 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
     
     --TrainData_use = trainData_use
     --print('GetParameters')
+    
+    fixEmptyGradients(model_struct)
+    
     local parameters, gradParameters = model_toTrain:getParameters()
-    modelP = parameters
+    assert(parameters:numel() == gradParameters:numel())
+    cprintf.Red('nParameters = %d\n', parameters:numel())
         
     --print('Shuffle')
     
@@ -1055,10 +1065,22 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         end
         
 
-        
+        local t_elapsed
         if trainingOpts.SAVE_TRAINING then
-            tic()
-            io.write(string.format('[Saving...' ))
+            
+            doClean = true
+            if doClean then
+                tic()
+                printf('[Cleaning...' )
+                cleanModel(model_struct)
+                --convertModelToFloat(model_struct)
+            
+                t_elapsed = toc()
+                printf(':%s]', sec2hms(t_elapsed))
+            end
+            
+            
+            printf('[Saving...' )
             --cleanModel(model_struct)
             --convertModelToFloat(model_struct)
             
@@ -1069,9 +1091,21 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
               --  model_toTrain:cuda()
             end
             
-            local t_elapsed = toc()
-            io.write(string.format('done:%s]', sec2hms(t_elapsed)))
+            t_elapsed = toc()
+            printf('done:%s]', sec2hms(t_elapsed))
             
+            doFix = false;
+            if doFix then
+                tic()
+                printf('[Fix...' )
+                fixEmptyGradients(model_struct)
+                --convertModelToFloat(model_struct)
+            
+                t_elapsed = toc()
+                printf(':%s]', sec2hms(t_elapsed))
+            end
+
+                        
             logger:add{['Epoch'] = epoch_id}        
             logger:add{['Train Cost'] = current_train_loss}
             logger:add{['Test  Cost'] = current_test_loss}
@@ -1182,6 +1216,23 @@ trainModel = function(model_struct, trainData, testData, trainingOpts, verbose)
         epoch_id = epoch_id + 1;
         
    
+    end
+
+
+    if trainingOpts.SAVE_TRAINING then
+        tic()
+        printf('[Final Cleaning...' )
+        
+        
+        cleanModel(trainingLogger, 'grad') -- which will be saved to disk
+        --convertModelToFloat(model_struct)
+        
+        io.write(string.format('][Saving...' ))
+        
+        trainingLogger:saveToFile()
+        
+        local t_elapsed = toc()
+        io.write(string.format('done:%s]', sec2hms(t_elapsed)))
     end
 
     return model_struct   -- important to return this at the end -- in case have loaded saved file and are replacing original one
